@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="jp">
+    <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>'url作成+遷移'</title>
+    </head>
+    <body>
+        <p>５秒後に自動で遷移する</p>
+        <a href="#" onclick="redirect();">動かないときはここを押す</a>
+        <script>
+        url = "https://fukuoka-city-subway.jorudan.biz/pc/diagramdtl?mode=1&fr=藤崎&frkbn=4&frsk=R&tosk=&dt=202110150000&dgm=藤崎（福岡）%3A福岡地下鉄空港線%3A福岡空港%3A西新%3A0&p=8%2C9"  
+        function redirect(){
+            location.replace = url;
+        }
+
+
+        setTimeout(function(){
+          window.location.href = url;
+        }, 5*1000);
+
+
+        </script>
+    </body>
+</html>
