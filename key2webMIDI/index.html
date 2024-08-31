@@ -3,16 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>オーディオループ＆ピッチシフター</title>
+    <title>オーディオループ＆ピッチシフター（キーボード表示付き）</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; }
         #status, #fileStatus { margin: 20px 0; }
         #controls { margin: 20px 0; }
         button { margin: 0 10px; padding: 10px 20px; font-size: 16px; }
+        #keyboard { display: flex; justify-content: center; margin-top: 20px; }
+        .key { width: 20px; height: 80px; background-color: white; border: 1px solid black; margin: 0 1px; }
+        .key.black { width: 16px; height: 50px; background-color: black; margin-left: -8px; margin-right: -8px; z-index: 1; }
+        .key.pressed { background-color: #ff9999; }
+        .key.black.pressed { background-color: #cc0000; }
     </style>
 </head>
 <body>
-    <h1>オーディオループ＆ピッチシフター</h1>
+    <h1>オーディオループ＆ピッチシフター（キーボード表示付き）</h1>
     <div id="status">MIDIデバイスを接続してください</div>
     <div id="fileStatus">音声ファイルを選択してください</div>
     <input type="file" id="audioFileInput" accept="audio/*">
@@ -20,6 +25,7 @@
         <button id="playButton" disabled>再生/停止</button>
         <button id="resetButton" disabled>リセット</button>
     </div>
+    <div id="keyboard"></div>
 
     <script>
         let audioContext;
@@ -27,10 +33,24 @@
         let audioBuffer;
         let isPlaying = false;
         let pitchShift = 1;
+        const keyboardStartNote = 48; // C3
+        const keyboardEndNote = 84; // C6
 
         // Web Audio APIのセットアップ
         function setupAudio() {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        // キーボードの作成
+        function createKeyboard() {
+            const keyboard = document.getElementById('keyboard');
+            for (let i = keyboardStartNote; i <= keyboardEndNote; i++) {
+                const key = document.createElement('div');
+                const noteName = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][i % 12];
+                key.className = `key ${noteName.includes('#') ? 'black' : 'white'}`;
+                key.dataset.note = i;
+                keyboard.appendChild(key);
+            }
         }
 
         // オーディオファイルの読み込み
@@ -93,7 +113,26 @@
         document.getElementById('resetButton').addEventListener('click', function() {
             stopAudio();
             pitchShift = 1;
+            resetKeyboard();
         });
+
+        // キーボードのリセット
+        function resetKeyboard() {
+            const keys = document.querySelectorAll('.key');
+            keys.forEach(key => key.classList.remove('pressed'));
+        }
+
+        // キーの状態更新
+        function updateKeyState(note, isPressed) {
+            const key = document.querySelector(`.key[data-note="${note}"]`);
+            if (key) {
+                if (isPressed) {
+                    key.classList.add('pressed');
+                } else {
+                    key.classList.remove('pressed');
+                }
+            }
+        }
 
         // MIDI入力の処理
         function onMIDISuccess(midiAccess) {
@@ -116,12 +155,15 @@
                 case 144: // noteOn
                     if (velocity > 0) {
                         pitchShift = Math.pow(2, (note - 60) / 12);
+                        updateKeyState(note, true);
                     } else {
                         pitchShift = 1;
+                        updateKeyState(note, false);
                     }
                     break;
                 case 128: // noteOff
                     pitchShift = 1;
+                    updateKeyState(note, false);
                     break;
             }
         }
@@ -136,6 +178,7 @@
 
         // セットアップ
         setupAudio();
+        createKeyboard();
     </script>
 </body>
 </html>
