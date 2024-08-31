@@ -3,45 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MIDI Pitch Shifter</title>
+    <title>オーディオループ＆ピッチシフター</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; }
-        #status { margin: 20px 0; }
-        #fileInput { margin-bottom: 20px; }
+        #status, #fileStatus { margin: 20px 0; }
+        #controls { margin: 20px 0; }
+        button { margin: 0 10px; padding: 10px 20px; font-size: 16px; }
     </style>
 </head>
 <body>
-    <h1>MIDI Pitch Shifter</h1>
+    <h1>オーディオループ＆ピッチシフター</h1>
     <div id="status">MIDIデバイスを接続してください</div>
-    <input type="file" id="fileInput" accept="audio/*">
+    <div id="fileStatus">音声ファイルを選択してください</div>
+    <input type="file" id="audioFileInput" accept="audio/*">
+    <div id="controls">
+        <button id="playButton" disabled>再生/停止</button>
+        <button id="resetButton" disabled>リセット</button>
+    </div>
+
     <script>
         let audioContext;
         let source;
-        let pitchShifter;
+        let audioBuffer;
+        let isPlaying = false;
+        let pitchShift = 1;
 
         // Web Audio APIのセットアップ
         function setupAudio() {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            pitchShifter = audioContext.createScriptProcessor(4096, 1, 1);
-            pitchShifter.connect(audioContext.destination);
         }
 
         // オーディオファイルの読み込み
-        document.getElementById('fileInput').addEventListener('change', function(e) {
+        document.getElementById('audioFileInput').addEventListener('change', function(e) {
             const file = e.target.files[0];
             const reader = new FileReader();
             reader.onload = function(e) {
                 audioContext.decodeAudioData(e.target.result, function(buffer) {
-                    if (source) {
-                        source.disconnect();
-                    }
-                    source = audioContext.createBufferSource();
-                    source.buffer = buffer;
-                    source.connect(pitchShifter);
-                    source.start(0);
+                    audioBuffer = buffer;
+                    document.getElementById('fileStatus').textContent = 'ファイルが読み込まれました';
+                    document.getElementById('playButton').disabled = false;
+                    document.getElementById('resetButton').disabled = false;
                 });
             };
             reader.readAsArrayBuffer(file);
+        });
+
+        // 再生/停止の切り替え
+        document.getElementById('playButton').addEventListener('click', function() {
+            if (isPlaying) {
+                stopAudio();
+            } else {
+                playAudio();
+            }
+        });
+
+        // オーディオの再生
+        function playAudio() {
+            source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.loop = true;
+
+            const pitchShifter = audioContext.createScriptProcessor(4096, 1, 1);
+            pitchShifter.onaudioprocess = function(e) {
+                const inputBuffer = e.inputBuffer.getChannelData(0);
+                const outputBuffer = e.outputBuffer.getChannelData(0);
+                for (let i = 0; i < inputBuffer.length; i++) {
+                    const index = i * pitchShift;
+                    outputBuffer[i] = inputBuffer[Math.floor(index) % inputBuffer.length];
+                }
+            };
+
+            source.connect(pitchShifter);
+            pitchShifter.connect(audioContext.destination);
+            source.start(0);
+            isPlaying = true;
+            document.getElementById('playButton').textContent = '停止';
+        }
+
+        // オーディオの停止
+        function stopAudio() {
+            if (source) {
+                source.stop(0);
+                isPlaying = false;
+                document.getElementById('playButton').textContent = '再生';
+            }
+        }
+
+        // リセットボタン
+        document.getElementById('resetButton').addEventListener('click', function() {
+            stopAudio();
+            pitchShift = 1;
         });
 
         // MIDI入力の処理
@@ -57,42 +108,22 @@
         }
 
         function getMIDIMessage(message) {
-            var command = message.data[0];
-            var note = message.data[1];
-            var velocity = (message.data.length > 2) ? message.data[2] : 0;
+            const command = message.data[0];
+            const note = message.data[1];
+            const velocity = (message.data.length > 2) ? message.data[2] : 0;
 
             switch (command) {
                 case 144: // noteOn
                     if (velocity > 0) {
-                        noteOn(note, velocity);
+                        pitchShift = Math.pow(2, (note - 60) / 12);
                     } else {
-                        noteOff(note);
+                        pitchShift = 1;
                     }
                     break;
                 case 128: // noteOff
-                    noteOff(note);
+                    pitchShift = 1;
                     break;
             }
-        }
-
-        function noteOn(note, velocity) {
-            // ピッチシフトの実装
-            const semitones = note - 60; // 中央のCを基準にシフト量を計算
-            const ratio = Math.pow(2, semitones / 12);
-            
-            pitchShifter.onaudioprocess = function(e) {
-                var input = e.inputBuffer.getChannelData(0);
-                var output = e.outputBuffer.getChannelData(0);
-                
-                for (var i = 0; i < input.length; i++) {
-                    // 簡易的なピッチシフト（実際にはより複雑なアルゴリズムが必要）
-                    output[i] = input[Math.floor(i * ratio)];
-                }
-            };
-        }
-
-        function noteOff(note) {
-            // ノートオフの処理（必要に応じて実装）
         }
 
         // Web MIDI APIの初期化
@@ -103,7 +134,7 @@
             document.getElementById('status').textContent = 'このブラウザはMIDIをサポートしていません';
         }
 
-        // オーディオのセットアップ
+        // セットアップ
         setupAudio();
     </script>
 </body>
