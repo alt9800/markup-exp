@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>シンプルMIDI＆仮想キーボード</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        #status { margin: 20px 0; }
+        #keyboard { display: flex; justify-content: center; margin-top: 20px; }
+        .key { width: 40px; height: 120px; background-color: white; border: 1px solid black; margin: 0 2px; cursor: pointer; }
+        .key.black { width: 30px; height: 80px; background-color: black; margin-left: -15px; margin-right: -15px; z-index: 1; }
+        #stopButton { margin-top: 20px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>シンプルMIDI＆仮想キーボード</h1>
+    <div id="status">MIDIデバイスを接続してください</div>
+    <div id="keyboard"></div>
+    <button id="stopButton">全ての音を停止</button>
+
+    <script>
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const keys = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const octave = 4;
+        let activeOscillators = {};
+
+        // 仮想キーボードの作成
+        function createKeyboard() {
+            const keyboard = document.getElementById('keyboard');
+            keys.forEach((key, index) => {
+                const keyElement = document.createElement('div');
+                keyElement.className = `key ${key.includes('#') ? 'black' : 'white'}`;
+                keyElement.dataset.note = index + octave * 12;
+                keyElement.addEventListener('mousedown', () => playNote(index + octave * 12));
+                keyElement.addEventListener('mouseup', () => stopNote(index + octave * 12));
+                keyElement.addEventListener('touchstart', (e) => { e.preventDefault(); playNote(index + octave * 12); });
+                keyElement.addEventListener('touchend', (e) => { e.preventDefault(); stopNote(index + octave * 12); });
+                keyboard.appendChild(keyElement);
+            });
+        }
+
+        // 音を再生
+        function playNote(note) {
+            const frequency = 440 * Math.pow(2, (note - 69) / 12);
+            const oscillator = audioContext.createOscillator();
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+            oscillator.connect(audioContext.destination);
+            oscillator.start();
+            activeOscillators[note] = oscillator;
+        }
+
+        // 音を停止
+        function stopNote(note) {
+            if (activeOscillators[note]) {
+                activeOscillators[note].stop();
+                delete activeOscillators[note];
+            }
+        }
+
+        // 全ての音を停止
+        function stopAllSounds() {
+            Object.keys(activeOscillators).forEach(note => {
+                stopNote(note);
+            });
+            // AudioContextをリセット
+            audioContext.close().then(() => {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            });
+        }
+
+        // MIDI成功時のコールバック
+        function onMIDISuccess(midiAccess) {
+            for (var input of midiAccess.inputs.values()) {
+                input.onmidimessage = getMIDIMessage;
+            }
+            document.getElementById('status').textContent = 'MIDIデバイスが接続されました';
+        }
+
+        // MIDI失敗時のコールバック
+        function onMIDIFailure() {
+            document.getElementById('status').textContent = 'MIDIデバイスの接続に失敗しました';
+        }
+
+        // MIDIメッセージの処理
+        function getMIDIMessage(message) {
+            const command = message.data[0];
+            const note = message.data[1];
+            const velocity = (message.data.length > 2) ? message.data[2] : 0;
+
+            switch (command) {
+                case 144: // noteOn
+                    if (velocity > 0) {
+                        playNote(note);
+                    } else {
+                        stopNote(note);
+                    }
+                    break;
+                case 128: // noteOff
+                    stopNote(note);
+                    break;
+            }
+        }
+
+        // Web MIDI APIの初期化
+        if (navigator.requestMIDIAccess) {
+            navigator.requestMIDIAccess()
+                .then(onMIDISuccess, onMIDIFailure);
+        } else {
+            document.getElementById('status').textContent = 'このブラウザはMIDIをサポートしていません';
+        }
+
+        // キーボードの作成
+        createKeyboard();
+
+        // 停止ボタンのイベントリスナーを追加
+        document.getElementById('stopButton').addEventListener('click', stopAllSounds);
+    </script>
+</body>
+</html>
