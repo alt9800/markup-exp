@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIDI Pitch Shifter</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        #status { margin: 20px 0; }
+        #fileInput { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <h1>MIDI Pitch Shifter</h1>
+    <div id="status">MIDIデバイスを接続してください</div>
+    <input type="file" id="fileInput" accept="audio/*">
+    <script>
+        let audioContext;
+        let source;
+        let pitchShifter;
+
+        // Web Audio APIのセットアップ
+        function setupAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            pitchShifter = audioContext.createScriptProcessor(4096, 1, 1);
+            pitchShifter.connect(audioContext.destination);
+        }
+
+        // オーディオファイルの読み込み
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                audioContext.decodeAudioData(e.target.result, function(buffer) {
+                    if (source) {
+                        source.disconnect();
+                    }
+                    source = audioContext.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(pitchShifter);
+                    source.start(0);
+                });
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // MIDI入力の処理
+        function onMIDISuccess(midiAccess) {
+            for (var input of midiAccess.inputs.values()) {
+                input.onmidimessage = getMIDIMessage;
+            }
+            document.getElementById('status').textContent = 'MIDIデバイスが接続されました';
+        }
+
+        function onMIDIFailure() {
+            document.getElementById('status').textContent = 'MIDIデバイスの接続に失敗しました';
+        }
+
+        function getMIDIMessage(message) {
+            var command = message.data[0];
+            var note = message.data[1];
+            var velocity = (message.data.length > 2) ? message.data[2] : 0;
+
+            switch (command) {
+                case 144: // noteOn
+                    if (velocity > 0) {
+                        noteOn(note, velocity);
+                    } else {
+                        noteOff(note);
+                    }
+                    break;
+                case 128: // noteOff
+                    noteOff(note);
+                    break;
+            }
+        }
+
+        function noteOn(note, velocity) {
+            // ピッチシフトの実装
+            const semitones = note - 60; // 中央のCを基準にシフト量を計算
+            const ratio = Math.pow(2, semitones / 12);
+            
+            pitchShifter.onaudioprocess = function(e) {
+                var input = e.inputBuffer.getChannelData(0);
+                var output = e.outputBuffer.getChannelData(0);
+                
+                for (var i = 0; i < input.length; i++) {
+                    // 簡易的なピッチシフト（実際にはより複雑なアルゴリズムが必要）
+                    output[i] = input[Math.floor(i * ratio)];
+                }
+            };
+        }
+
+        function noteOff(note) {
+            // ノートオフの処理（必要に応じて実装）
+        }
+
+        // Web MIDI APIの初期化
+        if (navigator.requestMIDIAccess) {
+            navigator.requestMIDIAccess()
+                .then(onMIDISuccess, onMIDIFailure);
+        } else {
+            document.getElementById('status').textContent = 'このブラウザはMIDIをサポートしていません';
+        }
+
+        // オーディオのセットアップ
+        setupAudio();
+    </script>
+</body>
+</html>
