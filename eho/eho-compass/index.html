@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>スマートフォンコンパス</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .compass-container {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            margin: 20px 0;
+        }
+
+        .compass {
+            width: 100%;
+            height: 100%;
+            border: 4px solid #fff;
+            border-radius: 50%;
+            position: relative;
+            background: radial-gradient(circle, #ffffff20 0%, transparent 70%);
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.3);
+        }
+
+        .needle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 4px;
+            height: 120px;
+            background: linear-gradient(to top, #ff4444 0%, #ff4444 45%, #ffffff 55%, #ffffff 100%);
+            transform-origin: center bottom;
+            transform: translate(-50%, -100%);
+            border-radius: 2px;
+            transition: transform 0.3s ease;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .center-dot {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 12px;
+            height: 12px;
+            background: #fff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+        }
+
+        .direction-labels {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .direction-label {
+            position: absolute;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .direction-label.north { top: 10px; left: 50%; transform: translateX(-50%); color: #ff4444; }
+        .direction-label.south { bottom: 10px; left: 50%; transform: translateX(-50%); }
+        .direction-label.east { right: 10px; top: 50%; transform: translateY(-50%); }
+        .direction-label.west { left: 10px; top: 50%; transform: translateY(-50%); }
+
+        .info-panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 10px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            text-align: center;
+            min-width: 300px;
+        }
+
+        .bearing-display {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .eho-display {
+            font-size: 18px;
+            margin: 15px 0;
+            padding: 10px;
+            background: rgba(255, 215, 0, 0.2);
+            border-radius: 10px;
+            border: 2px solid gold;
+        }
+
+        .year-selector {
+            margin: 10px 0;
+        }
+
+        .year-selector select {
+            padding: 8px 15px;
+            border-radius: 8px;
+            border: none;
+            background: white;
+            font-size: 16px;
+        }
+
+        .permission-btn {
+            background: #ff4444;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px;
+        }
+
+        .permission-btn:hover {
+            background: #cc3333;
+        }
+
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .error { background: rgba(255, 0, 0, 0.3); }
+        .success { background: rgba(0, 255, 0, 0.3); }
+    </style>
+</head>
+<body>
+    <h1>📱 スマートフォンコンパス</h1>
+    
+    <div class="info-panel">
+        <div id="status" class="status">センサーを初期化中...</div>
+        <button id="requestPermission" class="permission-btn" style="display: none;">
+            センサー許可を要求
+        </button>
+    </div>
+
+    <div class="compass-container">
+        <div class="compass">
+            <div class="needle" id="needle"></div>
+            <div class="center-dot"></div>
+            <div class="direction-labels">
+                <div class="direction-label north">N</div>
+                <div class="direction-label south">S</div>
+                <div class="direction-label east">E</div>
+                <div class="direction-label west">W</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="info-panel">
+        <div class="bearing-display" id="bearing">0°</div>
+        <div id="direction">北</div>
+    </div>
+
+    <div class="info-panel">
+        <div class="year-selector">
+            <label>年を選択: </label>
+            <select id="yearSelect">
+                <option value="2024">2024年</option>
+                <option value="2025" selected>2025年</option>
+                <option value="2026">2026年</option>
+            </select>
+        </div>
+        <div class="eho-display" id="ehoDisplay">
+            <strong>🧭 恵方: </strong><span id="ehoDirection">東北東</span>
+            <div style="font-size: 14px; margin-top: 5px;">
+                恵方まで: <span id="ehoDistance">---</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentHeading = 0;
+        const needle = document.getElementById('needle');
+        const bearingDisplay = document.getElementById('bearing');
+        const directionDisplay = document.getElementById('direction');
+        const statusDisplay = document.getElementById('status');
+        const permissionBtn = document.getElementById('requestPermission');
+        const yearSelect = document.getElementById('yearSelect');
+        const ehoDisplay = document.getElementById('ehoDirection');
+        const ehoDistance = document.getElementById('ehoDistance');
+
+        // 恵方の計算（西暦の一の位に基づく）
+        const ehoDirections = {
+            0: { direction: '西南西', bearing: 255 },    // 西暦末尾0
+            1: { direction: '南南東', bearing: 165 },    // 西暦末尾1
+            2: { direction: '北北西', bearing: 345 },    // 西暦末尾2
+            3: { direction: '南南東', bearing: 165 },    // 西暦末尾3
+            4: { direction: '東北東', bearing: 75 },     // 西暦末尾4
+            5: { direction: '西南西', bearing: 255 },    // 西暦末尾5
+            6: { direction: '南南東', bearing: 165 },    // 西暦末尾6
+            7: { direction: '北北西', bearing: 345 },    // 西暦末尾7
+            8: { direction: '南南東', bearing: 165 },    // 西暦末尾8
+            9: { direction: '東北東', bearing: 75 }      // 西暦末尾9
+        };
+
+        // 方角名の取得
+        function getDirectionName(bearing) {
+            const directions = [
+                '北', '北北東', '北東', '東北東',
+                '東', '東南東', '南東', '南南東',
+                '南', '南南西', '南西', '西南西',
+                '西', '西北西', '北西', '北北西'
+            ];
+            const index = Math.round((bearing % 360) / 22.5) % 16;
+            return directions[index];
+        }
+
+        // 角度差の計算
+        function getAngleDifference(current, target) {
+            let diff = target - current;
+            if (diff > 180) diff -= 360;
+            if (diff < -180) diff += 360;
+            return Math.abs(diff);
+        }
+
+        // 恵方の更新
+        function updateEho() {
+            const year = parseInt(yearSelect.value);
+            const yearDigit = year % 10;
+            const eho = ehoDirections[yearDigit];
+            
+            ehoDisplay.textContent = eho.direction;
+            
+            const distance = getAngleDifference(currentHeading, eho.bearing);
+            ehoDistance.textContent = `${distance.toFixed(1)}°`;
+        }
+
+        // デバイス方向の処理
+        function handleDeviceOrientation(event) {
+            // alpha: Z軸周りの回転（コンパス方向）
+            let heading = event.alpha;
+            
+            if (heading !== null) {
+                // iOS Safariでは値が逆になることがある
+                if (navigator.userAgent.includes('iPhone')) {
+                    heading = 360 - heading;
+                }
+                
+                currentHeading = Math.round(heading);
+                
+                // UIの更新
+                needle.style.transform = `translate(-50%, -100%) rotate(${heading}deg)`;
+                bearingDisplay.textContent = `${currentHeading}°`;
+                directionDisplay.textContent = getDirectionName(currentHeading);
+                
+                updateEho();
+                
+                statusDisplay.textContent = 'コンパス動作中';
+                statusDisplay.className = 'status success';
+            }
+        }
+
+        // センサー許可の要求（iOS 13+対応）
+        async function requestSensorPermission() {
+            try {
+                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    // iOS 13+
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission === 'granted') {
+                        startCompass();
+                    } else {
+                        statusDisplay.textContent = 'センサー許可が拒否されました';
+                        statusDisplay.className = 'status error';
+                    }
+                } else {
+                    // Android or older iOS
+                    startCompass();
+                }
+            } catch (error) {
+                statusDisplay.textContent = `エラー: ${error.message}`;
+                statusDisplay.className = 'status error';
+            }
+        }
+
+        // コンパスの開始
+        function startCompass() {
+            if (window.DeviceOrientationEvent) {
+                window.addEventListener('deviceorientation', handleDeviceOrientation);
+                statusDisplay.textContent = 'デバイスを水平に保持してください';
+                statusDisplay.className = 'status success';
+                permissionBtn.style.display = 'none';
+            } else {
+                statusDisplay.textContent = 'このデバイスはセンサーをサポートしていません';
+                statusDisplay.className = 'status error';
+            }
+        }
+
+        // 初期化
+        function init() {
+            updateEho();
+            
+            // iOS 13+かどうかチェック
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                statusDisplay.textContent = 'センサー許可が必要です';
+                permissionBtn.style.display = 'block';
+                permissionBtn.addEventListener('click', requestSensorPermission);
+            } else {
+                // Android or older iOS
+                setTimeout(startCompass, 1000);
+            }
+        }
+
+        // イベントリスナー
+        yearSelect.addEventListener('change', updateEho);
+
+        // ページ読み込み完了後に初期化
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>
