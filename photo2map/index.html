@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Photo Map</title>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
@@ -16,16 +16,16 @@
     --text:#2c2c2c;
     --text-sub:#6b6b6b;
     --accent:#c0392b;
-    --accent-light:#e74c3c;
     --shadow:0 1px 4px rgba(0,0,0,.12);
     --radius:3px;
     --font:'Noto Sans JP','Helvetica Neue',sans-serif;
+    --sab:env(safe-area-inset-bottom, 0px);
   }
-  html,body{height:100%;font-family:var(--font);color:var(--text);background:var(--bg)}
+  html,body{height:100%;font-family:var(--font);color:var(--text);background:var(--bg);overflow:hidden}
 
-  #app{display:flex;height:100vh;width:100vw;overflow:hidden}
+  /* ============ Desktop layout ============ */
+  #app{display:flex;height:100vh;height:100dvh;width:100vw;overflow:hidden}
 
-  /* sidebar */
   #sidebar{
     width:320px;min-width:280px;max-width:400px;
     background:var(--panel);border-right:1px solid var(--border);
@@ -38,9 +38,7 @@
   #sidebar-header h1{font-size:15px;font-weight:600;letter-spacing:.02em}
   #sidebar-header p{font-size:11px;color:var(--text-sub);margin-top:4px;line-height:1.5}
 
-  #photo-list{
-    flex:1;overflow-y:auto;padding:8px;
-  }
+  #photo-list{flex:1;overflow-y:auto;padding:8px}
   #photo-list::-webkit-scrollbar{width:5px}
   #photo-list::-webkit-scrollbar-thumb{background:#ccc;border-radius:3px}
 
@@ -73,7 +71,10 @@
   }
   #sidebar-footer button:hover{background:#f0eeea}
 
-  /* map area */
+  /* drag handle - hidden on desktop */
+  #sheet-handle{display:none}
+
+  /* map */
   #map-wrap{flex:1;position:relative}
   #map{width:100%;height:100%}
 
@@ -92,38 +93,32 @@
   #drop-overlay .inner p{font-size:14px;color:var(--text);font-weight:500}
   #drop-overlay .inner span{font-size:11px;color:var(--text-sub);display:block;margin-top:6px}
 
-  /* popup - custom close button */
+  /* popup */
   .maplibregl-popup-content{
     padding:0!important;border-radius:4px!important;
     box-shadow:0 2px 12px rgba(0,0,0,.18)!important;
     max-width:320px!important;overflow:visible!important;
     position:relative;
   }
-  .maplibregl-popup-close-button{
-    display:none!important;
-  }
+  .maplibregl-popup-close-button{display:none!important}
   .popup-close{
     position:absolute;top:-10px;right:-10px;z-index:10;
     width:28px;height:28px;border-radius:50%;
     background:#fff;border:1px solid var(--border);
     color:var(--text);font-size:16px;line-height:28px;text-align:center;
     cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.2);
-    transition:background .15s;
-    font-family:var(--font);
+    transition:background .15s;font-family:var(--font);
   }
   .popup-close:hover{background:#f0eeea}
   .popup-body{overflow:hidden;border-radius:4px}
-  .popup-img{
-    display:block;width:100%;max-height:240px;object-fit:contain;
-    background:#1a1a1a;
-  }
+  .popup-img{display:block;width:100%;max-height:240px;object-fit:contain;background:#1a1a1a}
   .popup-caption{
     padding:8px 12px;font-size:11px;color:var(--text-sub);
     border-top:1px solid var(--border);background:var(--panel);
     word-break:break-all;line-height:1.5;
   }
 
-  /* counter badge */
+  /* counter */
   #counter{
     position:absolute;top:12px;right:12px;z-index:5;
     background:var(--panel);border:1px solid var(--border);
@@ -144,18 +139,98 @@
 
   #file-input{display:none}
 
-  /* geolocate accuracy circle */
-  .maplibregl-user-location-accuracy-circle{
-    background:rgba(55,132,210,.12)!important;
-  }
-  .maplibregl-user-location-dot{
-    box-shadow:0 0 0 3px rgba(55,132,210,.3)!important;
+  .maplibregl-user-location-accuracy-circle{background:rgba(55,132,210,.12)!important}
+  .maplibregl-user-location-dot{box-shadow:0 0 0 3px rgba(55,132,210,.3)!important}
+
+  /* ============ Mobile layout (<= 768px) ============ */
+  @media (max-width: 768px) {
+    #app{display:block;position:relative}
+
+    /* Map fills entire screen */
+    #map-wrap{
+      position:absolute;inset:0;z-index:1;
+    }
+
+    /* Counter repositioned to top-left to avoid overlap with map controls */
+    #counter{
+      top:calc(12px + env(safe-area-inset-top, 0px));
+      left:12px;right:auto;
+    }
+
+    /* Bottom sheet */
+    #sidebar{
+      position:absolute;
+      left:0;right:0;
+      bottom:0;
+      width:100%;min-width:0;max-width:none;
+      height:auto;
+      max-height:70vh;
+      z-index:20;
+      border-right:none;
+      border-top:1px solid var(--border);
+      border-radius:14px 14px 0 0;
+      background:rgba(255,255,255,.92);
+      -webkit-backdrop-filter:blur(12px);
+      backdrop-filter:blur(12px);
+      box-shadow:0 -2px 16px rgba(0,0,0,.12);
+      transition:transform .3s cubic-bezier(.25,.46,.45,.94);
+      will-change:transform;
+      display:flex;flex-direction:column;
+      padding-bottom:var(--sab);
+    }
+    #sidebar.collapsed{
+      transform:translateY(calc(100% - 56px - var(--sab)));
+    }
+
+    /* Drag handle */
+    #sheet-handle{
+      display:flex;
+      justify-content:center;
+      padding:10px 0 4px;
+      cursor:grab;
+      -webkit-user-select:none;user-select:none;
+      flex-shrink:0;
+    }
+    #sheet-handle .bar{
+      width:36px;height:4px;
+      background:#c0bdb6;border-radius:2px;
+    }
+
+    #sidebar-header{
+      padding:4px 16px 10px;
+      border-bottom:1px solid rgba(0,0,0,.06);
+    }
+    #sidebar-header h1{font-size:14px}
+    #sidebar-header p{display:none}
+
+    #photo-list{
+      flex:1;overflow-y:auto;
+      -webkit-overflow-scrolling:touch;
+      overscroll-behavior:contain;
+      padding:4px 8px;
+    }
+
+    #sidebar-footer{
+      padding:8px 12px calc(8px + var(--sab));
+      border-top:1px solid rgba(0,0,0,.06);
+    }
+    #sidebar-footer button{padding:10px 0;font-size:13px}
+
+    /* Loading repositioned above bottom sheet */
+    #loading{bottom:72px}
+
+    /* Adjust map controls to not overlap with sheet */
+    .maplibregl-ctrl-bottom-right{
+      bottom:64px!important;
+      right:8px!important;
+    }
   }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="sidebar">
+    <div id="sheet-handle"><div class="bar"></div></div>
     <div id="sidebar-header">
       <h1>Photo Map</h1>
       <p>写真をドラッグ&amp;ドロップ、またはフォルダから読み込むと、EXIF位置情報を元に地図上にマッピングします。</p>
@@ -194,12 +269,93 @@
   const counterEl = document.getElementById('counter');
   const loadingEl = document.getElementById('loading');
   const fileInput = document.getElementById('file-input');
+  const sidebar = document.getElementById('sidebar');
 
   const photos = [];
   let activeId = null;
   let currentPopup = null;
   let idSeq = 0;
   let mapReady = false;
+
+  // ========== Bottom sheet drag (mobile) ==========
+
+  function isMobile() { return window.matchMedia('(max-width:768px)').matches; }
+
+  (function initSheet() {
+    const handle = document.getElementById('sheet-handle');
+    const header = document.getElementById('sidebar-header');
+    let startY = 0, startTranslate = 0, currentTranslate = 0, dragging = false;
+
+    // Start collapsed on mobile
+    if (isMobile()) sidebar.classList.add('collapsed');
+    window.addEventListener('resize', () => {
+      if (!isMobile()) {
+        sidebar.classList.remove('collapsed');
+        sidebar.style.transform = '';
+      }
+    });
+
+    function getCollapsedOffset() {
+      const sab = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sab')) || 0;
+      return sidebar.offsetHeight - 56 - sab;
+    }
+
+    function getCurrentTranslateY() {
+      const st = getComputedStyle(sidebar).transform;
+      if (!st || st === 'none') return 0;
+      const m = st.match(/matrix.*\((.+)\)/);
+      if (m) {
+        const vals = m[1].split(',');
+        return parseFloat(vals[5]) || 0;
+      }
+      return 0;
+    }
+
+    function onStart(clientY) {
+      if (!isMobile()) return;
+      dragging = true;
+      startY = clientY;
+      sidebar.style.transition = 'none';
+      startTranslate = getCurrentTranslateY();
+    }
+
+    function onMove(clientY) {
+      if (!dragging) return;
+      const dy = clientY - startY;
+      currentTranslate = Math.max(0, startTranslate + dy);
+      sidebar.style.transform = 'translateY(' + currentTranslate + 'px)';
+    }
+
+    function onEnd() {
+      if (!dragging) return;
+      dragging = false;
+      sidebar.style.transition = '';
+      const maxOffset = getCollapsedOffset();
+      // If dragged past 30% of collapsible range, snap to that state
+      if (currentTranslate > maxOffset * 0.3) {
+        sidebar.classList.add('collapsed');
+      } else {
+        sidebar.classList.remove('collapsed');
+      }
+      sidebar.style.transform = '';
+    }
+
+    // Touch events on handle and header
+    [handle, header].forEach(el => {
+      el.addEventListener('touchstart', e => { onStart(e.touches[0].clientY); }, { passive: true });
+      el.addEventListener('mousedown', e => { onStart(e.clientY); e.preventDefault(); });
+    });
+    document.addEventListener('touchmove', e => { onMove(e.touches[0].clientY); }, { passive: true });
+    document.addEventListener('mousemove', e => { if(dragging) onMove(e.clientY); });
+    document.addEventListener('touchend', onEnd);
+    document.addEventListener('mouseup', onEnd);
+
+    // Tap handle to toggle
+    handle.addEventListener('click', () => {
+      if (!isMobile()) return;
+      sidebar.classList.toggle('collapsed');
+    });
+  })();
 
   // ========== EXIF binary parser (JPEG, TIFF, HEIC) ==========
 
@@ -210,24 +366,13 @@
     const dv = new DataView(buffer);
     const len = buffer.byteLength;
     let tiffOffset = -1;
-
-    // Check JPEG
     if (len > 2 && dv.getUint8(0) === 0xFF && dv.getUint8(1) === 0xD8) {
       tiffOffset = findJpegExif(dv, len);
-    }
-    // Check TIFF
-    else if (len > 4) {
+    } else if (len > 4) {
       const sig = dv.getUint16(0, false);
-      if (sig === 0x4949 || sig === 0x4D4D) {
-        tiffOffset = 0;
-      }
+      if (sig === 0x4949 || sig === 0x4D4D) tiffOffset = 0;
     }
-
-    // HEIC or fallback: brute-force search for "Exif\0\0" then TIFF header
-    if (tiffOffset < 0) {
-      tiffOffset = findExifBruteForce(dv, len);
-    }
-
+    if (tiffOffset < 0) tiffOffset = findExifBruteForce(dv, len);
     if (tiffOffset < 0) return null;
     return parseTiffForGps(dv, tiffOffset, len);
   }
@@ -240,12 +385,9 @@
       const segLen = dv.getUint16(offset + 2, false);
       if (marker === 0xE1) {
         if (offset + 10 < len &&
-            dv.getUint8(offset + 4) === 0x45 &&
-            dv.getUint8(offset + 5) === 0x78 &&
-            dv.getUint8(offset + 6) === 0x69 &&
-            dv.getUint8(offset + 7) === 0x66 &&
-            dv.getUint8(offset + 8) === 0x00 &&
-            dv.getUint8(offset + 9) === 0x00) {
+            dv.getUint8(offset+4)===0x45 && dv.getUint8(offset+5)===0x78 &&
+            dv.getUint8(offset+6)===0x69 && dv.getUint8(offset+7)===0x66 &&
+            dv.getUint8(offset+8)===0x00 && dv.getUint8(offset+9)===0x00) {
           return offset + 10;
         }
       }
@@ -257,18 +399,13 @@
   function findExifBruteForce(dv, len) {
     const searchLen = Math.min(len - 8, 300000);
     for (let i = 0; i < searchLen; i++) {
-      if (dv.getUint8(i) === 0x45 &&
-          dv.getUint8(i + 1) === 0x78 &&
-          dv.getUint8(i + 2) === 0x69 &&
-          dv.getUint8(i + 3) === 0x66 &&
-          dv.getUint8(i + 4) === 0x00 &&
-          dv.getUint8(i + 5) === 0x00) {
-        const tiffStart = i + 6;
-        if (tiffStart + 8 <= len) {
-          const bo = dv.getUint16(tiffStart, false);
-          if (bo === 0x4949 || bo === 0x4D4D) {
-            return tiffStart;
-          }
+      if (dv.getUint8(i)===0x45 && dv.getUint8(i+1)===0x78 &&
+          dv.getUint8(i+2)===0x69 && dv.getUint8(i+3)===0x66 &&
+          dv.getUint8(i+4)===0x00 && dv.getUint8(i+5)===0x00) {
+        const t = i + 6;
+        if (t + 8 <= len) {
+          const bo = dv.getUint16(t, false);
+          if (bo === 0x4949 || bo === 0x4D4D) return t;
         }
       }
     }
@@ -279,24 +416,20 @@
     if (tiffOffset + 8 > bufLen) return null;
     const bo = dv.getUint16(tiffOffset, false);
     const le = (bo === 0x4949);
-    const magic = readUint16(dv, tiffOffset + 2, le);
-    if (magic !== 42) return null;
-    const ifd0Offset = readUint32(dv, tiffOffset + 4, le);
-    const gpsIfdPtr = findTagInIfd(dv, tiffOffset, tiffOffset + ifd0Offset, le, 0x8825, bufLen);
-    if (gpsIfdPtr === null) return null;
-    return parseGpsIfd(dv, tiffOffset, tiffOffset + gpsIfdPtr, le, bufLen);
+    if (readUint16(dv, tiffOffset + 2, le) !== 42) return null;
+    const ifd0Off = readUint32(dv, tiffOffset + 4, le);
+    const gpsPtr = findTagInIfd(dv, tiffOffset, tiffOffset + ifd0Off, le, 0x8825, bufLen);
+    if (gpsPtr === null) return null;
+    return parseGpsIfd(dv, tiffOffset, tiffOffset + gpsPtr, le, bufLen);
   }
 
-  function findTagInIfd(dv, base, ifdStart, le, targetTag, bufLen) {
+  function findTagInIfd(dv, base, ifdStart, le, tag, bufLen) {
     if (ifdStart + 2 > bufLen) return null;
     const count = readUint16(dv, ifdStart, le);
     for (let i = 0; i < count; i++) {
       const off = ifdStart + 2 + i * 12;
       if (off + 12 > bufLen) return null;
-      const tag = readUint16(dv, off, le);
-      if (tag === targetTag) {
-        return readUint32(dv, off + 8, le);
-      }
+      if (readUint16(dv, off, le) === tag) return readUint32(dv, off + 8, le);
     }
     return null;
   }
@@ -322,13 +455,11 @@
       }
     }
     if (tags[2] && tags[4]) {
-      let lat = tags[2][0] + tags[2][1] / 60 + tags[2][2] / 3600;
-      let lng = tags[4][0] + tags[4][1] / 60 + tags[4][2] / 3600;
-      if (tags[1] === 'S') lat = -lat;
-      if (tags[3] === 'W') lng = -lng;
-      if (isFinite(lat) && isFinite(lng) && (lat !== 0 || lng !== 0)) {
-        return { lat, lng };
-      }
+      let lat = tags[2][0] + tags[2][1]/60 + tags[2][2]/3600;
+      let lng = tags[4][0] + tags[4][1]/60 + tags[4][2]/3600;
+      if (tags[1]==='S') lat=-lat;
+      if (tags[3]==='W') lng=-lng;
+      if (isFinite(lat) && isFinite(lng) && (lat!==0||lng!==0)) return {lat,lng};
     }
     return null;
   }
@@ -337,12 +468,8 @@
     return new Promise(resolve => {
       const reader = new FileReader();
       reader.onload = function() {
-        try {
-          resolve(parseExifFromBuffer(reader.result));
-        } catch (e) {
-          console.warn('EXIF parse error:', e);
-          resolve(null);
-        }
+        try { resolve(parseExifFromBuffer(reader.result)); }
+        catch(e) { resolve(null); }
       };
       reader.onerror = () => resolve(null);
       reader.readAsArrayBuffer(file);
@@ -373,40 +500,21 @@
       data: { type: 'FeatureCollection', features: [] },
     });
     map.addLayer({
-      id: PHOTO_LAYER_STROKE,
-      type: 'circle',
-      source: PHOTO_SOURCE,
-      paint: {
-        'circle-radius': 8,
-        'circle-color': '#ffffff',
-      },
+      id: PHOTO_LAYER_STROKE, type: 'circle', source: PHOTO_SOURCE,
+      paint: { 'circle-radius': 8, 'circle-color': '#ffffff' },
     });
     map.addLayer({
-      id: PHOTO_LAYER_CIRCLE,
-      type: 'circle',
-      source: PHOTO_SOURCE,
-      paint: {
-        'circle-radius': 6,
-        'circle-color': '#c0392b',
-      },
+      id: PHOTO_LAYER_CIRCLE, type: 'circle', source: PHOTO_SOURCE,
+      paint: { 'circle-radius': 6, 'circle-color': '#c0392b' },
     });
 
     map.on('click', PHOTO_LAYER_CIRCLE, (e) => {
       if (!e.features || !e.features.length) return;
-      const id = e.features[0].properties.photoId;
-      const entry = photos.find(p => p.id === id);
-      if (entry && entry.hasGps) {
-        showPopup(entry);
-        setActive(entry.id);
-      }
+      const entry = photos.find(p => p.id === e.features[0].properties.photoId);
+      if (entry && entry.hasGps) { showPopup(entry); setActive(entry.id); }
     });
-
-    map.on('mouseenter', PHOTO_LAYER_CIRCLE, () => {
-      map.getCanvas().style.cursor = 'pointer';
-    });
-    map.on('mouseleave', PHOTO_LAYER_CIRCLE, () => {
-      map.getCanvas().style.cursor = '';
-    });
+    map.on('mouseenter', PHOTO_LAYER_CIRCLE, () => { map.getCanvas().style.cursor='pointer'; });
+    map.on('mouseleave', PHOTO_LAYER_CIRCLE, () => { map.getCanvas().style.cursor=''; });
 
     mapReady = true;
   });
@@ -431,8 +539,8 @@
   mapWrap.addEventListener('dragover', e => e.preventDefault());
   mapWrap.addEventListener('drop', e => { e.preventDefault(); dragCounter=0; dropOverlay.classList.remove('visible'); handleDrop(e.dataTransfer); });
 
-  document.getElementById('sidebar').addEventListener('dragover', e => e.preventDefault());
-  document.getElementById('sidebar').addEventListener('drop', e => { e.preventDefault(); dragCounter=0; dropOverlay.classList.remove('visible'); handleDrop(e.dataTransfer); });
+  sidebar.addEventListener('dragover', e => e.preventDefault());
+  sidebar.addEventListener('drop', e => { e.preventDefault(); dragCounter=0; dropOverlay.classList.remove('visible'); handleDrop(e.dataTransfer); });
 
   async function handleDrop(dt) {
     const files = [];
@@ -440,7 +548,7 @@
       for (const item of dt.items) {
         if (item.kind === 'file') {
           const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
-          if (entry && entry.isDirectory) { await readDirectory(entry, files); }
+          if (entry && entry.isDirectory) { await readDir(entry, files); }
           else { const f = item.getAsFile(); if(f) files.push(f); }
         }
       }
@@ -448,15 +556,15 @@
     processFiles(files);
   }
 
-  function readDirectory(dirEntry, out) {
+  function readDir(dirEntry, out) {
     return new Promise(resolve => {
       const reader = dirEntry.createReader();
       const batch = () => {
         reader.readEntries(async entries => {
           if (!entries.length) return resolve();
           for (const e of entries) {
-            if (e.isFile) { out.push(await new Promise(r => e.file(r))); }
-            else if (e.isDirectory) { await readDirectory(e, out); }
+            if (e.isFile) out.push(await new Promise(r => e.file(r)));
+            else if (e.isDirectory) await readDir(e, out);
           }
           batch();
         });
@@ -496,26 +604,19 @@
     const id = ++idSeq;
     const ext = file.name.toLowerCase().split('.').pop();
     const gps = await extractGps(file);
-
     let displayBlob = file;
     if (['heic','heif'].includes(ext)) {
       try { displayBlob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 }); }
-      catch(e) { console.warn('HEIC display conversion failed:', file.name, e); }
+      catch(e) { console.warn('HEIC conversion failed:', file.name, e); }
     }
-
     const thumbUrl = URL.createObjectURL(displayBlob);
-    photos.push({
-      id, name: file.name,
-      lat: gps ? gps.lat : null, lng: gps ? gps.lng : null,
-      thumbUrl, fullUrl: thumbUrl, hasGps: !!gps,
-    });
+    photos.push({ id, name: file.name, lat: gps?gps.lat:null, lng: gps?gps.lng:null, thumbUrl, fullUrl: thumbUrl, hasGps: !!gps });
   }
 
   // ========== Popup ==========
 
   function showPopup(entry) {
     if (currentPopup) { currentPopup.remove(); currentPopup = null; }
-
     const container = document.createElement('div');
     container.style.position = 'relative';
 
@@ -526,13 +627,9 @@
 
     const body = document.createElement('div');
     body.className = 'popup-body';
-
     const img = document.createElement('img');
-    img.className = 'popup-img';
-    img.src = entry.fullUrl;
-    img.alt = entry.name;
+    img.className = 'popup-img'; img.src = entry.fullUrl; img.alt = entry.name;
     body.appendChild(img);
-
     const caption = document.createElement('div');
     caption.className = 'popup-caption';
     caption.textContent = entry.name + '  (' + entry.lat.toFixed(6) + ', ' + entry.lng.toFixed(6) + ')';
@@ -540,10 +637,7 @@
     container.appendChild(body);
 
     currentPopup = new maplibregl.Popup({ closeOnClick: false, closeButton: false, maxWidth: '320px', offset: 14 })
-      .setLngLat([entry.lng, entry.lat])
-      .setDOMContent(container)
-      .addTo(map);
-
+      .setLngLat([entry.lng, entry.lat]).setDOMContent(container).addTo(map);
     closeBtn.addEventListener('click', () => { if(currentPopup){currentPopup.remove();currentPopup=null;} });
     currentPopup.on('close', () => { currentPopup = null; });
   }
@@ -552,20 +646,21 @@
 
   function renderList() {
     photoListEl.innerHTML = '';
-    const sorted = [...photos].sort((a,b) => (b.hasGps?1:0) - (a.hasGps?1:0));
+    const sorted = [...photos].sort((a,b) => (b.hasGps?1:0)-(a.hasGps?1:0));
     sorted.forEach(p => {
       const div = document.createElement('div');
-      div.className = 'photo-item' + (p.id === activeId ? ' active' : '');
+      div.className = 'photo-item' + (p.id===activeId?' active':'');
       const coordsHtml = p.hasGps
-        ? '<div class="coords">' + p.lat.toFixed(5) + ', ' + p.lng.toFixed(5) + '</div>'
+        ? '<div class="coords">'+p.lat.toFixed(5)+', '+p.lng.toFixed(5)+'</div>'
         : '<div class="no-gps">GPS情報なし</div>';
-      div.innerHTML = '<img src="' + p.thumbUrl + '" alt="">' +
-        '<div class="info"><div class="name">' + p.name + '</div>' + coordsHtml + '</div>';
+      div.innerHTML = '<img src="'+p.thumbUrl+'" alt=""><div class="info"><div class="name">'+p.name+'</div>'+coordsHtml+'</div>';
       div.addEventListener('click', () => {
         setActive(p.id);
         if (p.hasGps) {
           map.flyTo({ center: [p.lng, p.lat], zoom: Math.max(map.getZoom(), 14), duration: 600 });
           showPopup(p);
+          // On mobile, collapse sheet to show map
+          if (isMobile()) sidebar.classList.add('collapsed');
         }
       });
       photoListEl.appendChild(div);
@@ -575,20 +670,20 @@
   function setActive(id) { activeId = id; renderList(); }
 
   function updateCounter() {
-    const total = photos.length, gps = photos.filter(p => p.hasGps).length;
-    counterEl.textContent = '写真: ' + total + ' 枚 / GPS: ' + gps + ' 枚';
+    const total = photos.length, gps = photos.filter(p=>p.hasGps).length;
+    counterEl.textContent = '写真: '+total+' 枚 / GPS: '+gps+' 枚';
   }
 
   function fitBounds() {
-    const gps = photos.filter(p => p.hasGps);
+    const gps = photos.filter(p=>p.hasGps);
     if (!gps.length) return;
-    if (gps.length === 1) { map.flyTo({ center: [gps[0].lng, gps[0].lat], zoom: 15, duration: 800 }); return; }
+    if (gps.length===1) { map.flyTo({center:[gps[0].lng,gps[0].lat],zoom:15,duration:800}); return; }
     const bounds = new maplibregl.LngLatBounds();
-    gps.forEach(p => bounds.extend([p.lng, p.lat]));
-    map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 800 });
+    gps.forEach(p=>bounds.extend([p.lng,p.lat]));
+    map.fitBounds(bounds,{padding:80,maxZoom:16,duration:800});
   }
 
-  function showLoading(v) { loadingEl.classList.toggle('visible', v); }
+  function showLoading(v) { loadingEl.classList.toggle('visible',v); }
 
 })();
 </script>
