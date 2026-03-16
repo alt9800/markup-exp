@@ -236,6 +236,7 @@ html,body{height:100%;font-family:var(--font);color:var(--text);background:var(-
     <div id="modal-map"></div>
     <div id="modal-footer">
       <span class="hint">地図をクリックしてジオタグを設定 / ピンをドラッグで移動</span>
+      <button class="modal-btn" id="modal-dl">この写真をDL</button>
       <button class="modal-btn save" id="modal-save">保存</button>
     </div>
   </div>
@@ -543,6 +544,20 @@ document.getElementById('modal-save').addEventListener('click',()=>{
   }
   closeModal();
   renderGrid(); updateStats();
+});
+
+// Individual download — apply current marker position, save state, then download
+document.getElementById('modal-dl').addEventListener('click',async()=>{
+  const p=photos.find(x=>x.id===currentEditId);
+  if(!p)return;
+  // Apply current marker position before download
+  if(editMarker){
+    const ll=editMarker.getLngLat();
+    p.newLat=ll.lat; p.newLng=ll.lng;
+    p.edited=true;
+  }
+  renderGrid(); updateStats();
+  try{await downloadPhoto(p)}catch(e){console.warn('DL fail:',p.name,e)}
 });
 
 // Remove GPS
