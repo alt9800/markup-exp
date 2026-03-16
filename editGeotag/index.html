@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>GeoTag Editor</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#edecea;
+  --panel:#fff;
+  --border:#d2cfc8;
+  --text:#2a2a2a;
+  --text-sub:#777;
+  --accent:#2d6a4f;
+  --accent-hover:#1b4332;
+  --accent-light:rgba(45,106,79,.08);
+  --danger:#b5342a;
+  --shadow:0 1px 3px rgba(0,0,0,.08);
+  --radius:4px;
+  --font:'Noto Sans JP','Helvetica Neue',sans-serif;
+  --sab:env(safe-area-inset-bottom, 0px);
+}
+html,body{height:100%;font-family:var(--font);color:var(--text);background:var(--bg);overflow:hidden}
+
+/* ============ App shell ============ */
+#app{
+  display:flex;flex-direction:column;
+  height:100vh;height:100dvh;width:100vw;
+}
+
+/* Top bar */
+#topbar{
+  display:flex;align-items:center;gap:12px;
+  padding:12px 20px;
+  background:var(--panel);border-bottom:1px solid var(--border);
+  flex-shrink:0;z-index:5;
+}
+#topbar h1{font-size:15px;font-weight:700;letter-spacing:.01em;flex:1}
+#topbar .stats{font-size:11px;color:var(--text-sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tb-btn{
+  padding:6px 14px;font-size:12px;font-family:var(--font);
+  border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--panel);color:var(--text);cursor:pointer;
+  transition:background .15s;white-space:nowrap;
+}
+.tb-btn:hover{background:#f0eeea}
+.tb-btn.primary{
+  background:var(--accent);color:#fff;border-color:var(--accent);
+}
+.tb-btn.primary:hover{background:var(--accent-hover)}
+
+/* ============ Grid ============ */
+#grid-wrap{
+  flex:1;overflow-y:auto;overflow-x:hidden;
+  padding:16px;
+  -webkit-overflow-scrolling:touch;
+}
+#grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));
+  gap:12px;
+}
+#empty-state{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  height:100%;color:var(--text-sub);text-align:center;padding:40px;
+}
+#empty-state .icon{font-size:48px;margin-bottom:12px;opacity:.3}
+#empty-state p{font-size:13px;line-height:1.6}
+#empty-state .hint{font-size:11px;margin-top:8px;color:#aaa}
+
+/* Photo card */
+.card{
+  position:relative;border-radius:var(--radius);overflow:hidden;
+  background:var(--panel);border:1px solid var(--border);
+  cursor:pointer;transition:box-shadow .2s, border-color .2s;
+}
+.card:hover{box-shadow:0 2px 8px rgba(0,0,0,.1);border-color:#bbb}
+.card.edited{border-color:var(--accent)}
+.card .thumb{
+  width:100%;aspect-ratio:1;object-fit:cover;display:block;
+  background:#e8e6e2;
+}
+.card .meta{padding:8px 10px}
+.card .meta .fname{
+  font-size:11px;font-weight:500;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.card .meta .gps-info{
+  font-size:10px;color:var(--text-sub);margin-top:3px;
+  font-variant-numeric:tabular-nums;
+}
+.card .badge{
+  position:absolute;top:6px;right:6px;
+  padding:2px 6px;border-radius:2px;
+  font-size:9px;font-weight:600;letter-spacing:.03em;
+}
+.card .badge.has-gps{background:rgba(45,106,79,.85);color:#fff}
+.card .badge.no-gps{background:rgba(0,0,0,.5);color:#ddd}
+.card .badge.edited-badge{background:var(--accent);color:#fff}
+
+/* ============ Map modal ============ */
+#modal-overlay{
+  position:fixed;inset:0;z-index:100;
+  background:rgba(0,0,0,.45);
+  display:none;align-items:center;justify-content:center;
+  padding:20px;
+}
+#modal-overlay.open{display:flex}
+
+#modal{
+  width:100%;max-width:800px;
+  height:80vh;max-height:700px;
+  background:var(--panel);border-radius:8px;
+  overflow:hidden;display:flex;flex-direction:column;
+  box-shadow:0 8px 40px rgba(0,0,0,.25);
+}
+
+#modal-header{
+  display:flex;align-items:center;gap:12px;
+  padding:14px 18px;border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+#modal-header .title{flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#modal-header .coord-display{
+  font-size:11px;color:var(--text-sub);font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+.modal-btn{
+  padding:5px 12px;font-size:11px;font-family:var(--font);
+  border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--panel);color:var(--text);cursor:pointer;
+  transition:background .15s;
+}
+.modal-btn:hover{background:#f0eeea}
+.modal-btn.save{background:var(--accent);color:#fff;border-color:var(--accent)}
+.modal-btn.save:hover{background:var(--accent-hover)}
+.modal-btn.remove{color:var(--danger);border-color:var(--danger)}
+.modal-btn.remove:hover{background:rgba(181,52,42,.06)}
+
+#modal-map{flex:1}
+
+#modal-footer{
+  display:flex;align-items:center;gap:8px;
+  padding:10px 18px;border-top:1px solid var(--border);
+  flex-shrink:0;
+}
+#modal-footer .hint{flex:1;font-size:11px;color:var(--text-sub)}
+
+/* marker */
+.edit-marker{
+  width:20px;height:20px;
+  background:var(--accent);border:3px solid #fff;
+  border-radius:50%;
+  box-shadow:0 2px 6px rgba(0,0,0,.35);
+  cursor:grab;
+}
+
+/* mobile popup info */
+.maplibregl-popup-content{
+  padding:8px 12px!important;border-radius:4px!important;
+  font-size:11px!important;color:var(--text-sub)!important;
+  box-shadow:0 1px 6px rgba(0,0,0,.15)!important;
+}
+.maplibregl-popup-close-button{display:none!important}
+
+#file-input{display:none}
+
+/* ============ Mobile ============ */
+@media(max-width:600px){
+  #topbar{padding:10px 14px;gap:8px}
+  #topbar h1{font-size:14px}
+  #grid-wrap{padding:10px}
+  #grid{
+    grid-template-columns:repeat(auto-fill, minmax(120px, 1fr));
+    gap:8px;
+  }
+  #modal-overlay{padding:0;align-items:flex-end}
+  #modal{
+    max-width:100%;height:92vh;max-height:none;
+    border-radius:14px 14px 0 0;
+    padding-bottom:var(--sab);
+  }
+  #modal-header{padding:12px 14px}
+  #modal-footer{padding:10px 14px calc(6px + var(--sab))}
+}
+
+/* ============ Download overlay ============ */
+#dl-overlay{
+  position:fixed;inset:0;z-index:200;
+  background:rgba(0,0,0,.5);
+  display:none;align-items:center;justify-content:center;
+}
+#dl-overlay.open{display:flex}
+#dl-box{
+  background:var(--panel);border-radius:8px;padding:32px 40px;
+  text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.25);
+  max-width:360px;width:90%;
+}
+#dl-box p{font-size:13px;margin-bottom:16px;line-height:1.5}
+#dl-box .btns{display:flex;gap:8px;justify-content:center}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="topbar">
+    <h1>GeoTag Editor</h1>
+    <span class="stats" id="stats"></span>
+    <button class="tb-btn" id="btn-add">ファイルを追加</button>
+    <button class="tb-btn primary" id="btn-dl-all">一括DL</button>
+  </div>
+  <div id="grid-wrap">
+    <div id="empty-state">
+      <div class="icon">&#x1F4F7;</div>
+      <p>写真をドラッグ&amp;ドロップ、<br>またはファイルを追加してください</p>
+      <span class="hint">JPEG / PNG / TIFF / HEIC 対応</span>
+    </div>
+    <div id="grid"></div>
+  </div>
+</div>
+
+<!-- Map modal -->
+<div id="modal-overlay">
+  <div id="modal">
+    <div id="modal-header">
+      <span class="title" id="modal-title"></span>
+      <span class="coord-display" id="modal-coords"></span>
+      <button class="modal-btn remove" id="modal-remove-gps">GPS削除</button>
+      <button class="modal-btn" id="modal-close">閉じる</button>
+    </div>
+    <div id="modal-map"></div>
+    <div id="modal-footer">
+      <span class="hint">地図をクリックしてジオタグを設定 / ピンをドラッグで移動</span>
+      <button class="modal-btn save" id="modal-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Download confirm -->
+<div id="dl-overlay">
+  <div id="dl-box">
+    <p id="dl-msg"></p>
+    <div class="btns">
+      <button class="modal-btn" id="dl-cancel">キャンセル</button>
+      <button class="modal-btn save" id="dl-confirm">ダウンロード</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file-input" multiple accept="image/*,.heic,.heif,.tif,.tiff">
+
+<script>
+(function(){
+'use strict';
+
+const STYLE_URL = 'https://tile.openstreetmap.jp/styles/osm-bright-ja/style.json';
+
+const gridEl = document.getElementById('grid');
+const emptyEl = document.getElementById('empty-state');
+const statsEl = document.getElementById('stats');
+const fileInput = document.getElementById('file-input');
+const modalOverlay = document.getElementById('modal-overlay');
+const modalTitle = document.getElementById('modal-title');
+const modalCoords = document.getElementById('modal-coords');
+
+const photos = []; // {id, name, origFile, ext, lat, lng, newLat, newLng, edited, thumbUrl, displayUrl, hasOrigGps}
+let idSeq = 0;
+let modalMap = null;
+let modalMapReady = false;
+let editMarker = null;
+let currentEditId = null;
+
+// ========== EXIF binary parser ==========
+
+function readU16(dv,o,le){return dv.getUint16(o,le)}
+function readU32(dv,o,le){return dv.getUint32(o,le)}
+
+function parseGpsFromBuffer(buf) {
+  const dv = new DataView(buf);
+  const len = buf.byteLength;
+  let t = -1;
+  if (len>2 && dv.getUint8(0)===0xFF && dv.getUint8(1)===0xD8) t = findJE(dv,len);
+  else if (len>4) { const s=dv.getUint16(0,false); if(s===0x4949||s===0x4D4D) t=0; }
+  if (t<0) t = findBF(dv,len);
+  if (t<0) return null;
+  return parseTiff(dv,t,len);
+}
+
+function findJE(dv,len){
+  let o=2;
+  while(o+4<len){
+    if(dv.getUint8(o)!==0xFF)break;
+    const m=dv.getUint8(o+1),sl=dv.getUint16(o+2,false);
+    if(m===0xE1 && o+10<len && dv.getUint8(o+4)===0x45&&dv.getUint8(o+5)===0x78&&dv.getUint8(o+6)===0x69&&dv.getUint8(o+7)===0x66&&dv.getUint8(o+8)===0&&dv.getUint8(o+9)===0)
+      return o+10;
+    o+=2+sl;
+  }
+  return -1;
+}
+
+function findBF(dv,len){
+  const sl=Math.min(len-8,300000);
+  for(let i=0;i<sl;i++){
+    if(dv.getUint8(i)===0x45&&dv.getUint8(i+1)===0x78&&dv.getUint8(i+2)===0x69&&dv.getUint8(i+3)===0x66&&dv.getUint8(i+4)===0&&dv.getUint8(i+5)===0){
+      const t=i+6;
+      if(t+8<=len){const bo=dv.getUint16(t,false);if(bo===0x4949||bo===0x4D4D)return t;}
+    }
+  }
+  return -1;
+}
+
+function parseTiff(dv,to,bl){
+  if(to+8>bl)return null;
+  const le=(dv.getUint16(to,false)===0x4949);
+  if(readU16(dv,to+2,le)!==42)return null;
+  const ifd0=readU32(dv,to+4,le);
+  const gp=findTag(dv,to,to+ifd0,le,0x8825,bl);
+  if(gp===null)return null;
+  return parseGI(dv,to,to+gp,le,bl);
+}
+
+function findTag(dv,base,is,le,tag,bl){
+  if(is+2>bl)return null;
+  const c=readU16(dv,is,le);
+  for(let i=0;i<c;i++){const o=is+2+i*12;if(o+12>bl)return null;if(readU16(dv,o,le)===tag)return readU32(dv,o+8,le);}
+  return null;
+}
+
+function parseGI(dv,base,is,le,bl){
+  if(is+2>bl)return null;
+  const c=readU16(dv,is,le), tags={};
+  for(let i=0;i<c;i++){
+    const o=is+2+i*12;if(o+12>bl)break;
+    const tag=readU16(dv,o,le);
+    if(tag===1||tag===3) tags[tag]=String.fromCharCode(dv.getUint8(o+8));
+    else if(tag===2||tag===4){
+      const vo=base+readU32(dv,o+8,le);
+      if(vo+24<=bl){
+        const d=readU32(dv,vo,le)/readU32(dv,vo+4,le);
+        const m=readU32(dv,vo+8,le)/readU32(dv,vo+12,le);
+        const s=readU32(dv,vo+16,le)/readU32(dv,vo+20,le);
+        tags[tag]=[d,m,s];
+      }
+    }
+  }
+  if(tags[2]&&tags[4]){
+    let lat=tags[2][0]+tags[2][1]/60+tags[2][2]/3600;
+    let lng=tags[4][0]+tags[4][1]/60+tags[4][2]/3600;
+    if(tags[1]==='S')lat=-lat; if(tags[3]==='W')lng=-lng;
+    if(isFinite(lat)&&isFinite(lng)&&(lat!==0||lng!==0))return{lat,lng};
+  }
+  return null;
+}
+
+function extractGps(file){
+  return new Promise(r=>{
+    const rd=new FileReader();
+    rd.onload=function(){try{r(parseGpsFromBuffer(rd.result))}catch(e){r(null)}};
+    rd.onerror=()=>r(null);
+    rd.readAsArrayBuffer(file);
+  });
+}
+
+// ========== File handling ==========
+
+document.getElementById('btn-add').addEventListener('click',()=>fileInput.click());
+fileInput.addEventListener('change',()=>{if(fileInput.files.length)processFiles(Array.from(fileInput.files));fileInput.value='';});
+
+// Drag & drop on grid area
+const gridWrap = document.getElementById('grid-wrap');
+let dragC=0;
+gridWrap.addEventListener('dragenter',e=>{e.preventDefault();dragC++;gridWrap.style.outline='2px dashed var(--accent)';});
+gridWrap.addEventListener('dragleave',e=>{e.preventDefault();dragC--;if(dragC<=0){dragC=0;gridWrap.style.outline='';}});
+gridWrap.addEventListener('dragover',e=>e.preventDefault());
+gridWrap.addEventListener('drop',e=>{e.preventDefault();dragC=0;gridWrap.style.outline='';handleDrop(e.dataTransfer);});
+
+async function handleDrop(dt){
+  const files=[];
+  if(dt.items){for(const item of dt.items){if(item.kind==='file'){const en=item.webkitGetAsEntry?item.webkitGetAsEntry():null;if(en&&en.isDirectory){await readDir(en,files)}else{const f=item.getAsFile();if(f)files.push(f)}}}}
+  else{for(const f of dt.files)files.push(f)}
+  processFiles(files);
+}
+
+function readDir(de,out){
+  return new Promise(resolve=>{
+    const rd=de.createReader();
+    const batch=()=>{rd.readEntries(async entries=>{if(!entries.length)return resolve();for(const e of entries){if(e.isFile)out.push(await new Promise(r=>e.file(r)));else if(e.isDirectory)await readDir(e,out)}batch()})};
+    batch();
+  });
+}
+
+async function processFiles(files){
+  const imgs=files.filter(f=>{
+    const ext=f.name.toLowerCase().split('.').pop();
+    return['jpg','jpeg','png','tif','tiff','heic','heif'].includes(ext)||f.type.startsWith('image/');
+  });
+  if(!imgs.length)return;
+  for(const file of imgs){
+    try{await addPhoto(file)}catch(e){console.warn('Failed:',file.name,e)}
+  }
+  renderGrid();
+  updateStats();
+}
+
+async function addPhoto(file){
+  const id=++idSeq;
+  const ext=file.name.toLowerCase().split('.').pop();
+  const gps=await extractGps(file);
+  let displayBlob=file;
+  if(['heic','heif'].includes(ext)){
+    try{displayBlob=await heic2any({blob:file,toType:'image/jpeg',quality:0.85})}
+    catch(e){console.warn('HEIC conv fail:',file.name,e)}
+  }
+  const thumbUrl=URL.createObjectURL(displayBlob);
+  photos.push({
+    id, name:file.name, origFile:file, ext,
+    lat:gps?gps.lat:null, lng:gps?gps.lng:null,
+    newLat:gps?gps.lat:null, newLng:gps?gps.lng:null,
+    edited:false, thumbUrl, displayUrl:thumbUrl,
+    hasOrigGps:!!gps,
+  });
+}
+
+// ========== Grid rendering ==========
+
+function renderGrid(){
+  emptyEl.style.display = photos.length ? 'none' : 'flex';
+  gridEl.innerHTML='';
+  photos.forEach(p=>{
+    const card=document.createElement('div');
+    card.className='card'+(p.edited?' edited':'');
+    let badgeClass, badgeText;
+    if(p.edited){ badgeClass='edited-badge'; badgeText='編集済'; }
+    else if(p.hasOrigGps){ badgeClass='has-gps'; badgeText='GPS'; }
+    else{ badgeClass='no-gps'; badgeText='GPS なし'; }
+
+    const gpsText = (p.newLat!==null && p.newLng!==null)
+      ? p.newLat.toFixed(5)+', '+p.newLng.toFixed(5) : '---';
+
+    card.innerHTML='<img class="thumb" src="'+p.thumbUrl+'" alt="" loading="lazy">'
+      +'<div class="badge '+badgeClass+'">'+badgeText+'</div>'
+      +'<div class="meta"><div class="fname">'+p.name+'</div><div class="gps-info">'+gpsText+'</div></div>';
+    card.addEventListener('click',()=>openModal(p.id));
+    gridEl.appendChild(card);
+  });
+}
+
+function updateStats(){
+  const total=photos.length;
+  const gps=photos.filter(p=>p.newLat!==null).length;
+  const edited=photos.filter(p=>p.edited).length;
+  statsEl.textContent=total+'枚 / GPS:'+gps+' / 編集:'+edited;
+}
+
+// ========== Map modal ==========
+
+function openModal(photoId){
+  currentEditId = photoId;
+  const p = photos.find(x=>x.id===photoId);
+  if(!p) return;
+
+  modalTitle.textContent = p.name;
+  updateCoordDisplay(p.newLat, p.newLng);
+  modalOverlay.classList.add('open');
+
+  if(!modalMap){
+    modalMap = new maplibregl.Map({
+      container:'modal-map',
+      style:STYLE_URL,
+      center:[136.9,35.2], zoom:5,
+      attributionControl:true,
+    });
+    modalMap.addControl(new maplibregl.NavigationControl(),'bottom-right');
+    const geo = new maplibregl.GeolocateControl({positionOptions:{enableHighAccuracy:true},trackUserLocation:false});
+    modalMap.addControl(geo,'bottom-right');
+
+    modalMap.on('load',()=>{
+      modalMapReady=true;
+      setupModalMapForPhoto(p);
+    });
+
+    modalMap.on('click',(e)=>{
+      const lat=e.lngLat.lat, lng=e.lngLat.lng;
+      placeOrMoveMarker(lat,lng);
+    });
+  } else {
+    modalMap.resize();
+    setupModalMapForPhoto(p);
+  }
+}
+
+function setupModalMapForPhoto(p){
+  // Remove existing marker
+  if(editMarker){editMarker.remove();editMarker=null;}
+
+  if(p.newLat!==null && p.newLng!==null){
+    placeMarkerAt(p.newLat, p.newLng);
+    modalMap.flyTo({center:[p.newLng,p.newLat],zoom:14,duration:400});
+  } else {
+    modalMap.flyTo({center:[136.9,35.2],zoom:5,duration:400});
+  }
+}
+
+function placeMarkerAt(lat,lng){
+  if(editMarker){editMarker.remove();}
+  const el=document.createElement('div');
+  el.className='edit-marker';
+  editMarker = new maplibregl.Marker({element:el, draggable:true})
+    .setLngLat([lng,lat])
+    .addTo(modalMap);
+  editMarker.on('dragend',()=>{
+    const lngLat=editMarker.getLngLat();
+    updateCoordDisplay(lngLat.lat, lngLat.lng);
+  });
+  updateCoordDisplay(lat,lng);
+}
+
+function placeOrMoveMarker(lat,lng){
+  placeMarkerAt(lat,lng);
+}
+
+function updateCoordDisplay(lat,lng){
+  if(lat!==null && lng!==null){
+    modalCoords.textContent=lat.toFixed(6)+', '+lng.toFixed(6);
+  } else {
+    modalCoords.textContent='---';
+  }
+}
+
+// Save
+document.getElementById('modal-save').addEventListener('click',()=>{
+  const p=photos.find(x=>x.id===currentEditId);
+  if(!p)return;
+  if(editMarker){
+    const ll=editMarker.getLngLat();
+    p.newLat=ll.lat; p.newLng=ll.lng;
+    p.edited=true;
+  }
+  closeModal();
+  renderGrid(); updateStats();
+});
+
+// Remove GPS
+document.getElementById('modal-remove-gps').addEventListener('click',()=>{
+  const p=photos.find(x=>x.id===currentEditId);
+  if(!p)return;
+  p.newLat=null; p.newLng=null;
+  p.edited=true;
+  if(editMarker){editMarker.remove();editMarker=null;}
+  updateCoordDisplay(null,null);
+});
+
+// Close
+document.getElementById('modal-close').addEventListener('click',closeModal);
+modalOverlay.addEventListener('click',(e)=>{if(e.target===modalOverlay)closeModal()});
+
+function closeModal(){
+  modalOverlay.classList.remove('open');
+  currentEditId=null;
+}
+
+// ========== Download ==========
+
+const dlOverlay=document.getElementById('dl-overlay');
+const dlMsg=document.getElementById('dl-msg');
+
+document.getElementById('btn-dl-all').addEventListener('click',()=>{
+  const edited=photos.filter(p=>p.edited);
+  if(!edited.length && !photos.length){return}
+  const target = edited.length ? edited : photos.filter(p=>p.newLat!==null);
+  if(!target.length){
+    dlMsg.textContent='ダウンロード対象の写真がありません。';
+    dlOverlay.classList.add('open');
+    document.getElementById('dl-confirm').style.display='none';
+    return;
+  }
+  document.getElementById('dl-confirm').style.display='';
+  dlMsg.textContent=target.length+'枚の写真（編集済み: '+edited.length+'枚）をダウンロードします。';
+  dlOverlay.classList.add('open');
+});
+
+document.getElementById('dl-cancel').addEventListener('click',()=>dlOverlay.classList.remove('open'));
+
+document.getElementById('dl-confirm').addEventListener('click',async()=>{
+  dlOverlay.classList.remove('open');
+  const edited=photos.filter(p=>p.edited);
+  const target=edited.length?edited:photos.filter(p=>p.newLat!==null);
+  for(const p of target){
+    try{await downloadPhoto(p)}catch(e){console.warn('DL fail:',p.name,e)}
+  }
+});
+
+async function downloadPhoto(p){
+  // For JPEG: use piexif to write GPS
+  const ext=p.ext;
+  if(!['jpg','jpeg'].includes(ext)){
+    // Non-JPEG: just download as-is (EXIF write not supported for PNG/TIFF/HEIC in browser)
+    downloadBlob(p.origFile, p.name);
+    return;
+  }
+
+  const dataUrl = await fileToDataUrl(p.origFile);
+
+  if(p.newLat===null || p.newLng===null){
+    // Remove GPS
+    try{
+      const exifObj=piexif.load(dataUrl);
+      delete exifObj.GPS;
+      exifObj.GPS={};
+      const exifBytes=piexif.dump(exifObj);
+      const newDataUrl=piexif.insert(exifBytes,dataUrl);
+      downloadDataUrl(newDataUrl, p.name);
+    }catch(e){
+      console.warn('piexif remove fail, downloading original:',e);
+      downloadBlob(p.origFile,p.name);
+    }
+    return;
+  }
+
+  // Write GPS
+  try{
+    const exifObj=piexif.load(dataUrl);
+    exifObj.GPS[piexif.GPSIFD.GPSLatitudeRef] = p.newLat>=0?'N':'S';
+    exifObj.GPS[piexif.GPSIFD.GPSLatitude] = degToDmsRational(Math.abs(p.newLat));
+    exifObj.GPS[piexif.GPSIFD.GPSLongitudeRef] = p.newLng>=0?'E':'W';
+    exifObj.GPS[piexif.GPSIFD.GPSLongitude] = degToDmsRational(Math.abs(p.newLng));
+    exifObj.GPS[piexif.GPSIFD.GPSVersionID] = [2,3,0,0];
+    const exifBytes=piexif.dump(exifObj);
+    const newDataUrl=piexif.insert(exifBytes,dataUrl);
+    downloadDataUrl(newDataUrl, p.name);
+  }catch(e){
+    console.warn('piexif write fail, downloading original:',e);
+    downloadBlob(p.origFile,p.name);
+  }
+}
+
+function degToDmsRational(deg){
+  const d=Math.floor(deg);
+  const mf=(deg-d)*60;
+  const m=Math.floor(mf);
+  const sf=(mf-m)*60;
+  // Use 10000 denominator for sub-arcsecond precision
+  const s=Math.round(sf*10000);
+  return [[d,1],[m,1],[s,10000]];
+}
+
+function fileToDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onload=()=>resolve(r.result);
+    r.onerror=reject;
+    r.readAsDataURL(file);
+  });
+}
+
+function downloadDataUrl(dataUrl, filename){
+  const a=document.createElement('a');
+  a.href=dataUrl; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+function downloadBlob(blob, filename){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ========== Init ==========
+renderGrid();
+updateStats();
+
+})();
+</script>
+</body>
+</html>
