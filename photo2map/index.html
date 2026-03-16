@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Photo Map</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#f5f4f0;
+    --panel:#fff;
+    --border:#d4d0c8;
+    --text:#2c2c2c;
+    --text-sub:#6b6b6b;
+    --accent:#c0392b;
+    --accent-light:#e74c3c;
+    --shadow:0 1px 4px rgba(0,0,0,.12);
+    --radius:3px;
+    --font:'Noto Sans JP','Helvetica Neue',sans-serif;
+  }
+  html,body{height:100%;font-family:var(--font);color:var(--text);background:var(--bg)}
+
+  #app{display:flex;height:100vh;width:100vw;overflow:hidden}
+
+  /* sidebar */
+  #sidebar{
+    width:320px;min-width:280px;max-width:400px;
+    background:var(--panel);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;z-index:2;
+    box-shadow:2px 0 8px rgba(0,0,0,.06);
+  }
+  #sidebar-header{
+    padding:16px 20px 12px;border-bottom:1px solid var(--border);
+  }
+  #sidebar-header h1{font-size:15px;font-weight:600;letter-spacing:.02em}
+  #sidebar-header p{font-size:11px;color:var(--text-sub);margin-top:4px;line-height:1.5}
+
+  #photo-list{
+    flex:1;overflow-y:auto;padding:8px;
+  }
+  #photo-list::-webkit-scrollbar{width:5px}
+  #photo-list::-webkit-scrollbar-thumb{background:#ccc;border-radius:3px}
+
+  .photo-item{
+    display:flex;align-items:center;gap:10px;
+    padding:8px 10px;border-radius:var(--radius);cursor:pointer;
+    border:1px solid transparent;transition:background .15s;
+    margin-bottom:2px;
+  }
+  .photo-item:hover{background:#f0eeea}
+  .photo-item.active{background:#ede8e0;border-color:var(--border)}
+  .photo-item img{
+    width:48px;height:48px;object-fit:cover;border-radius:2px;
+    border:1px solid var(--border);flex-shrink:0;
+  }
+  .photo-item .info{overflow:hidden}
+  .photo-item .info .name{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .photo-item .info .coords{font-size:10px;color:var(--text-sub);margin-top:2px;font-variant-numeric:tabular-nums}
+  .photo-item .no-gps{font-size:10px;color:#b0a090;font-style:italic}
+
+  #sidebar-footer{
+    padding:10px 16px;border-top:1px solid var(--border);
+    display:flex;gap:8px;
+  }
+  #sidebar-footer button{
+    flex:1;padding:7px 0;font-size:12px;
+    border:1px solid var(--border);border-radius:var(--radius);
+    background:var(--panel);color:var(--text);cursor:pointer;
+    transition:background .15s;font-family:var(--font);
+  }
+  #sidebar-footer button:hover{background:#f0eeea}
+
+  /* map area */
+  #map-wrap{flex:1;position:relative}
+  #map{width:100%;height:100%}
+
+  /* drop overlay */
+  #drop-overlay{
+    position:absolute;inset:0;z-index:10;
+    background:rgba(255,255,255,.85);
+    display:none;align-items:center;justify-content:center;
+    pointer-events:none;
+  }
+  #drop-overlay.visible{display:flex}
+  #drop-overlay .inner{
+    border:2px dashed var(--accent);border-radius:8px;
+    padding:48px 64px;text-align:center;
+  }
+  #drop-overlay .inner p{font-size:14px;color:var(--text);font-weight:500}
+  #drop-overlay .inner span{font-size:11px;color:var(--text-sub);display:block;margin-top:6px}
+
+  /* popup - custom close button */
+  .maplibregl-popup-content{
+    padding:0!important;border-radius:4px!important;
+    box-shadow:0 2px 12px rgba(0,0,0,.18)!important;
+    max-width:320px!important;overflow:visible!important;
+    position:relative;
+  }
+  .maplibregl-popup-close-button{
+    display:none!important;
+  }
+  .popup-close{
+    position:absolute;top:-10px;right:-10px;z-index:10;
+    width:28px;height:28px;border-radius:50%;
+    background:#fff;border:1px solid var(--border);
+    color:var(--text);font-size:16px;line-height:28px;text-align:center;
+    cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.2);
+    transition:background .15s;
+    font-family:var(--font);
+  }
+  .popup-close:hover{background:#f0eeea}
+  .popup-body{overflow:hidden;border-radius:4px}
+  .popup-img{
+    display:block;width:100%;max-height:240px;object-fit:contain;
+    background:#1a1a1a;
+  }
+  .popup-caption{
+    padding:8px 12px;font-size:11px;color:var(--text-sub);
+    border-top:1px solid var(--border);background:var(--panel);
+    word-break:break-all;line-height:1.5;
+  }
+
+  /* counter badge */
+  #counter{
+    position:absolute;top:12px;right:12px;z-index:5;
+    background:var(--panel);border:1px solid var(--border);
+    border-radius:var(--radius);padding:5px 12px;
+    font-size:11px;color:var(--text-sub);box-shadow:var(--shadow);
+    font-variant-numeric:tabular-nums;
+  }
+
+  /* loading */
+  #loading{
+    position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+    z-index:5;background:var(--panel);border:1px solid var(--border);
+    border-radius:var(--radius);padding:6px 16px;
+    font-size:11px;color:var(--text-sub);box-shadow:var(--shadow);
+    display:none;
+  }
+  #loading.visible{display:block}
+
+  #file-input{display:none}
+
+  /* geolocate accuracy circle */
+  .maplibregl-user-location-accuracy-circle{
+    background:rgba(55,132,210,.12)!important;
+  }
+  .maplibregl-user-location-dot{
+    box-shadow:0 0 0 3px rgba(55,132,210,.3)!important;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <h1>Photo Map</h1>
+      <p>写真をドラッグ&amp;ドロップ、またはフォルダから読み込むと、EXIF位置情報を元に地図上にマッピングします。</p>
+    </div>
+    <div id="photo-list"></div>
+    <div id="sidebar-footer">
+      <button id="btn-add" type="button">ファイルを追加</button>
+      <button id="btn-clear" type="button">すべて削除</button>
+    </div>
+  </div>
+  <div id="map-wrap">
+    <div id="map"></div>
+    <div id="drop-overlay">
+      <div class="inner">
+        <p>ここに写真をドロップ</p>
+        <span>TIFF / JPEG / PNG / HEIC 対応</span>
+      </div>
+    </div>
+    <div id="counter">写真: 0 枚 / GPS: 0 枚</div>
+    <div id="loading">読み込み中…</div>
+  </div>
+</div>
+<input type="file" id="file-input" multiple accept="image/*,.heic,.heif,.tif,.tiff">
+
+<script>
+(function(){
+  'use strict';
+
+  const STYLE_URL = 'https://tile.openstreetmap.jp/styles/osm-bright-ja/style.json';
+  const PHOTO_SOURCE = 'photo-source';
+  const PHOTO_LAYER_CIRCLE = 'photo-circle';
+  const PHOTO_LAYER_STROKE = 'photo-stroke';
+
+  const photoListEl = document.getElementById('photo-list');
+  const dropOverlay = document.getElementById('drop-overlay');
+  const counterEl = document.getElementById('counter');
+  const loadingEl = document.getElementById('loading');
+  const fileInput = document.getElementById('file-input');
+
+  const photos = [];
+  let activeId = null;
+  let currentPopup = null;
+  let idSeq = 0;
+  let mapReady = false;
+
+  // ========== EXIF binary parser (JPEG, TIFF, HEIC) ==========
+
+  function readUint16(dv, offset, le) { return dv.getUint16(offset, le); }
+  function readUint32(dv, offset, le) { return dv.getUint32(offset, le); }
+
+  function parseExifFromBuffer(buffer) {
+    const dv = new DataView(buffer);
+    const len = buffer.byteLength;
+    let tiffOffset = -1;
+
+    // Check JPEG
+    if (len > 2 && dv.getUint8(0) === 0xFF && dv.getUint8(1) === 0xD8) {
+      tiffOffset = findJpegExif(dv, len);
+    }
+    // Check TIFF
+    else if (len > 4) {
+      const sig = dv.getUint16(0, false);
+      if (sig === 0x4949 || sig === 0x4D4D) {
+        tiffOffset = 0;
+      }
+    }
+
+    // HEIC or fallback: brute-force search for "Exif\0\0" then TIFF header
+    if (tiffOffset < 0) {
+      tiffOffset = findExifBruteForce(dv, len);
+    }
+
+    if (tiffOffset < 0) return null;
+    return parseTiffForGps(dv, tiffOffset, len);
+  }
+
+  function findJpegExif(dv, len) {
+    let offset = 2;
+    while (offset + 4 < len) {
+      if (dv.getUint8(offset) !== 0xFF) break;
+      const marker = dv.getUint8(offset + 1);
+      const segLen = dv.getUint16(offset + 2, false);
+      if (marker === 0xE1) {
+        if (offset + 10 < len &&
+            dv.getUint8(offset + 4) === 0x45 &&
+            dv.getUint8(offset + 5) === 0x78 &&
+            dv.getUint8(offset + 6) === 0x69 &&
+            dv.getUint8(offset + 7) === 0x66 &&
+            dv.getUint8(offset + 8) === 0x00 &&
+            dv.getUint8(offset + 9) === 0x00) {
+          return offset + 10;
+        }
+      }
+      offset += 2 + segLen;
+    }
+    return -1;
+  }
+
+  function findExifBruteForce(dv, len) {
+    const searchLen = Math.min(len - 8, 300000);
+    for (let i = 0; i < searchLen; i++) {
+      if (dv.getUint8(i) === 0x45 &&
+          dv.getUint8(i + 1) === 0x78 &&
+          dv.getUint8(i + 2) === 0x69 &&
+          dv.getUint8(i + 3) === 0x66 &&
+          dv.getUint8(i + 4) === 0x00 &&
+          dv.getUint8(i + 5) === 0x00) {
+        const tiffStart = i + 6;
+        if (tiffStart + 8 <= len) {
+          const bo = dv.getUint16(tiffStart, false);
+          if (bo === 0x4949 || bo === 0x4D4D) {
+            return tiffStart;
+          }
+        }
+      }
+    }
+    return -1;
+  }
+
+  function parseTiffForGps(dv, tiffOffset, bufLen) {
+    if (tiffOffset + 8 > bufLen) return null;
+    const bo = dv.getUint16(tiffOffset, false);
+    const le = (bo === 0x4949);
+    const magic = readUint16(dv, tiffOffset + 2, le);
+    if (magic !== 42) return null;
+    const ifd0Offset = readUint32(dv, tiffOffset + 4, le);
+    const gpsIfdPtr = findTagInIfd(dv, tiffOffset, tiffOffset + ifd0Offset, le, 0x8825, bufLen);
+    if (gpsIfdPtr === null) return null;
+    return parseGpsIfd(dv, tiffOffset, tiffOffset + gpsIfdPtr, le, bufLen);
+  }
+
+  function findTagInIfd(dv, base, ifdStart, le, targetTag, bufLen) {
+    if (ifdStart + 2 > bufLen) return null;
+    const count = readUint16(dv, ifdStart, le);
+    for (let i = 0; i < count; i++) {
+      const off = ifdStart + 2 + i * 12;
+      if (off + 12 > bufLen) return null;
+      const tag = readUint16(dv, off, le);
+      if (tag === targetTag) {
+        return readUint32(dv, off + 8, le);
+      }
+    }
+    return null;
+  }
+
+  function parseGpsIfd(dv, base, ifdStart, le, bufLen) {
+    if (ifdStart + 2 > bufLen) return null;
+    const count = readUint16(dv, ifdStart, le);
+    const tags = {};
+    for (let i = 0; i < count; i++) {
+      const off = ifdStart + 2 + i * 12;
+      if (off + 12 > bufLen) break;
+      const tag = readUint16(dv, off, le);
+      if (tag === 1 || tag === 3) {
+        tags[tag] = String.fromCharCode(dv.getUint8(off + 8));
+      } else if (tag === 2 || tag === 4) {
+        const valOff = base + readUint32(dv, off + 8, le);
+        if (valOff + 24 <= bufLen) {
+          const d = readUint32(dv, valOff, le) / readUint32(dv, valOff + 4, le);
+          const m = readUint32(dv, valOff + 8, le) / readUint32(dv, valOff + 12, le);
+          const s = readUint32(dv, valOff + 16, le) / readUint32(dv, valOff + 20, le);
+          tags[tag] = [d, m, s];
+        }
+      }
+    }
+    if (tags[2] && tags[4]) {
+      let lat = tags[2][0] + tags[2][1] / 60 + tags[2][2] / 3600;
+      let lng = tags[4][0] + tags[4][1] / 60 + tags[4][2] / 3600;
+      if (tags[1] === 'S') lat = -lat;
+      if (tags[3] === 'W') lng = -lng;
+      if (isFinite(lat) && isFinite(lng) && (lat !== 0 || lng !== 0)) {
+        return { lat, lng };
+      }
+    }
+    return null;
+  }
+
+  function extractGps(file) {
+    return new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = function() {
+        try {
+          resolve(parseExifFromBuffer(reader.result));
+        } catch (e) {
+          console.warn('EXIF parse error:', e);
+          resolve(null);
+        }
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  // ========== Map ==========
+
+  const map = new maplibregl.Map({
+    container: 'map',
+    style: STYLE_URL,
+    center: [136.9, 35.2],
+    zoom: 5,
+    attributionControl: true,
+  });
+  map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+
+  const geolocate = new maplibregl.GeolocateControl({
+    positionOptions: { enableHighAccuracy: true },
+    trackUserLocation: true,
+    showUserHeading: true,
+  });
+  map.addControl(geolocate, 'bottom-right');
+
+  map.on('load', () => {
+    map.addSource(PHOTO_SOURCE, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    });
+    map.addLayer({
+      id: PHOTO_LAYER_STROKE,
+      type: 'circle',
+      source: PHOTO_SOURCE,
+      paint: {
+        'circle-radius': 8,
+        'circle-color': '#ffffff',
+      },
+    });
+    map.addLayer({
+      id: PHOTO_LAYER_CIRCLE,
+      type: 'circle',
+      source: PHOTO_SOURCE,
+      paint: {
+        'circle-radius': 6,
+        'circle-color': '#c0392b',
+      },
+    });
+
+    map.on('click', PHOTO_LAYER_CIRCLE, (e) => {
+      if (!e.features || !e.features.length) return;
+      const id = e.features[0].properties.photoId;
+      const entry = photos.find(p => p.id === id);
+      if (entry && entry.hasGps) {
+        showPopup(entry);
+        setActive(entry.id);
+      }
+    });
+
+    map.on('mouseenter', PHOTO_LAYER_CIRCLE, () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', PHOTO_LAYER_CIRCLE, () => {
+      map.getCanvas().style.cursor = '';
+    });
+
+    mapReady = true;
+  });
+
+  function updateGeoJsonSource() {
+    if (!mapReady) return;
+    const features = photos.filter(p => p.hasGps).map(p => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+      properties: { photoId: p.id, name: p.name },
+    }));
+    map.getSource(PHOTO_SOURCE).setData({ type: 'FeatureCollection', features });
+  }
+
+  // ========== Drag & Drop ==========
+
+  let dragCounter = 0;
+  const mapWrap = document.getElementById('map-wrap');
+
+  mapWrap.addEventListener('dragenter', e => { e.preventDefault(); dragCounter++; dropOverlay.classList.add('visible'); });
+  mapWrap.addEventListener('dragleave', e => { e.preventDefault(); dragCounter--; if(dragCounter<=0){dragCounter=0;dropOverlay.classList.remove('visible');} });
+  mapWrap.addEventListener('dragover', e => e.preventDefault());
+  mapWrap.addEventListener('drop', e => { e.preventDefault(); dragCounter=0; dropOverlay.classList.remove('visible'); handleDrop(e.dataTransfer); });
+
+  document.getElementById('sidebar').addEventListener('dragover', e => e.preventDefault());
+  document.getElementById('sidebar').addEventListener('drop', e => { e.preventDefault(); dragCounter=0; dropOverlay.classList.remove('visible'); handleDrop(e.dataTransfer); });
+
+  async function handleDrop(dt) {
+    const files = [];
+    if (dt.items) {
+      for (const item of dt.items) {
+        if (item.kind === 'file') {
+          const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+          if (entry && entry.isDirectory) { await readDirectory(entry, files); }
+          else { const f = item.getAsFile(); if(f) files.push(f); }
+        }
+      }
+    } else { for (const f of dt.files) files.push(f); }
+    processFiles(files);
+  }
+
+  function readDirectory(dirEntry, out) {
+    return new Promise(resolve => {
+      const reader = dirEntry.createReader();
+      const batch = () => {
+        reader.readEntries(async entries => {
+          if (!entries.length) return resolve();
+          for (const e of entries) {
+            if (e.isFile) { out.push(await new Promise(r => e.file(r))); }
+            else if (e.isDirectory) { await readDirectory(e, out); }
+          }
+          batch();
+        });
+      };
+      batch();
+    });
+  }
+
+  // ========== File input & clear ==========
+
+  document.getElementById('btn-add').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => { if(fileInput.files.length) processFiles(Array.from(fileInput.files)); fileInput.value=''; });
+
+  document.getElementById('btn-clear').addEventListener('click', () => {
+    photos.length = 0; activeId = null;
+    if(currentPopup){currentPopup.remove();currentPopup=null;}
+    updateGeoJsonSource(); renderList(); updateCounter();
+  });
+
+  // ========== Process ==========
+
+  async function processFiles(files) {
+    const imgs = files.filter(f => {
+      const ext = f.name.toLowerCase().split('.').pop();
+      return ['jpg','jpeg','png','tif','tiff','heic','heif'].includes(ext) || f.type.startsWith('image/');
+    });
+    if (!imgs.length) return;
+    showLoading(true);
+    for (const file of imgs) {
+      try { await addPhoto(file); } catch(e) { console.warn('Failed:', file.name, e); }
+    }
+    showLoading(false);
+    updateGeoJsonSource(); renderList(); updateCounter(); fitBounds();
+  }
+
+  async function addPhoto(file) {
+    const id = ++idSeq;
+    const ext = file.name.toLowerCase().split('.').pop();
+    const gps = await extractGps(file);
+
+    let displayBlob = file;
+    if (['heic','heif'].includes(ext)) {
+      try { displayBlob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 }); }
+      catch(e) { console.warn('HEIC display conversion failed:', file.name, e); }
+    }
+
+    const thumbUrl = URL.createObjectURL(displayBlob);
+    photos.push({
+      id, name: file.name,
+      lat: gps ? gps.lat : null, lng: gps ? gps.lng : null,
+      thumbUrl, fullUrl: thumbUrl, hasGps: !!gps,
+    });
+  }
+
+  // ========== Popup ==========
+
+  function showPopup(entry) {
+    if (currentPopup) { currentPopup.remove(); currentPopup = null; }
+
+    const container = document.createElement('div');
+    container.style.position = 'relative';
+
+    const closeBtn = document.createElement('div');
+    closeBtn.className = 'popup-close';
+    closeBtn.textContent = '\u00d7';
+    container.appendChild(closeBtn);
+
+    const body = document.createElement('div');
+    body.className = 'popup-body';
+
+    const img = document.createElement('img');
+    img.className = 'popup-img';
+    img.src = entry.fullUrl;
+    img.alt = entry.name;
+    body.appendChild(img);
+
+    const caption = document.createElement('div');
+    caption.className = 'popup-caption';
+    caption.textContent = entry.name + '  (' + entry.lat.toFixed(6) + ', ' + entry.lng.toFixed(6) + ')';
+    body.appendChild(caption);
+    container.appendChild(body);
+
+    currentPopup = new maplibregl.Popup({ closeOnClick: false, closeButton: false, maxWidth: '320px', offset: 14 })
+      .setLngLat([entry.lng, entry.lat])
+      .setDOMContent(container)
+      .addTo(map);
+
+    closeBtn.addEventListener('click', () => { if(currentPopup){currentPopup.remove();currentPopup=null;} });
+    currentPopup.on('close', () => { currentPopup = null; });
+  }
+
+  // ========== List ==========
+
+  function renderList() {
+    photoListEl.innerHTML = '';
+    const sorted = [...photos].sort((a,b) => (b.hasGps?1:0) - (a.hasGps?1:0));
+    sorted.forEach(p => {
+      const div = document.createElement('div');
+      div.className = 'photo-item' + (p.id === activeId ? ' active' : '');
+      const coordsHtml = p.hasGps
+        ? '<div class="coords">' + p.lat.toFixed(5) + ', ' + p.lng.toFixed(5) + '</div>'
+        : '<div class="no-gps">GPS情報なし</div>';
+      div.innerHTML = '<img src="' + p.thumbUrl + '" alt="">' +
+        '<div class="info"><div class="name">' + p.name + '</div>' + coordsHtml + '</div>';
+      div.addEventListener('click', () => {
+        setActive(p.id);
+        if (p.hasGps) {
+          map.flyTo({ center: [p.lng, p.lat], zoom: Math.max(map.getZoom(), 14), duration: 600 });
+          showPopup(p);
+        }
+      });
+      photoListEl.appendChild(div);
+    });
+  }
+
+  function setActive(id) { activeId = id; renderList(); }
+
+  function updateCounter() {
+    const total = photos.length, gps = photos.filter(p => p.hasGps).length;
+    counterEl.textContent = '写真: ' + total + ' 枚 / GPS: ' + gps + ' 枚';
+  }
+
+  function fitBounds() {
+    const gps = photos.filter(p => p.hasGps);
+    if (!gps.length) return;
+    if (gps.length === 1) { map.flyTo({ center: [gps[0].lng, gps[0].lat], zoom: 15, duration: 800 }); return; }
+    const bounds = new maplibregl.LngLatBounds();
+    gps.forEach(p => bounds.extend([p.lng, p.lat]));
+    map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 800 });
+  }
+
+  function showLoading(v) { loadingEl.classList.toggle('visible', v); }
+
+})();
+</script>
+</body>
+</html>

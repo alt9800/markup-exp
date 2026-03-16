@@ -10,3 +10,4 @@ Try and error regarding markup
 |[simpleMIDI](./key2webMIDI/simpleMIDI/)|webMIDIを鍵盤と接続して鳴らすテスト|
 |[eho](./eho)|恵方の表示の試行錯誤|
 |[mapintimeline](./map-in-timeline)|地図domのタイムライン埋め込みの夢を|
+|[photo2map](./photo2map)|ドラッグ&ドロップで写真を地図上に表示できるGPS確認用アプリ|
