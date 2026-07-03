@@ -15,3 +15,5 @@
 
 
 [地図とOrientationAPI](./Orientation)
+
+向きセンサをためそう！！
