@@ -30,6 +30,15 @@
             color: var(--text-primary);
         }
 
+        /* PC/タブレット: 地図を全面表示し、パネルを重ねる */
+        #mapContainer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+
         #map {
             position: absolute;
             top: 0;
@@ -174,17 +183,29 @@
             color: var(--text-primary);
         }
 
-        /* --- モバイル対応 --- */
+        /* --- モバイル対応: 地図とパネルを重ねず上下に分割 --- */
         @media (max-width: 600px) {
+            html, body {
+                display: flex;
+                flex-direction: column;
+            }
+
+            #mapContainer {
+                position: relative;
+                flex: 1 1 auto;
+                min-height: 0;
+            }
+
             .control-panel {
-                top: auto;
-                bottom: 0;
-                left: 0;
-                right: 0;
+                position: static;
                 width: 100%;
                 max-width: 100%;
-                border-radius: 12px 12px 0 0;
-                max-height: 60vh;
+                border-radius: 0;
+                border-left: none;
+                border-right: none;
+                border-bottom: none;
+                max-height: 45vh;
+                flex: 0 0 auto;
                 padding-bottom: env(safe-area-inset-bottom);
             }
 
@@ -195,22 +216,19 @@
             .panel-body.collapsed {
                 display: none;
             }
-
-            /* ナビゲーションコントロールと重ならないよう上に余白 */
-            .maplibregl-ctrl-top-right {
-                top: 8px;
-            }
         }
     </style>
 </head>
 <body>
-    <div id="map"></div>
+    <div id="mapContainer">
+        <div id="map"></div>
 
-    <div class="compass-overlay" id="compassOverlay">
-        <canvas class="compass-canvas" id="compassCanvas" width="400" height="400"></canvas>
+        <div class="compass-overlay" id="compassOverlay">
+            <canvas class="compass-canvas" id="compassCanvas" width="400" height="400"></canvas>
+        </div>
+
+        <div class="location-marker"></div>
     </div>
-
-    <div class="location-marker"></div>
 
     <div class="control-panel" id="controlPanel">
         <div class="panel-header">
@@ -448,6 +466,19 @@
         const initialYear = 2025;
         const initialEhouIndex = getEhouIndex(initialYear);
         document.getElementById('directionDisplay').textContent = directions[initialEhouIndex];
+
+        // モバイル: 初期状態でパネルを閉じ、コンパスのサイズを縮小する
+        // 600pxはCSS側のブレークポイントと一致させている
+        const isMobile = window.matchMedia('(max-width: 600px)').matches;
+        if (isMobile) {
+            panelBody.classList.add('collapsed');
+            panelToggle.textContent = '▴';
+
+            const mobileDefaultSize = 220;
+            document.getElementById('sizeSlider').value = mobileDefaultSize;
+            document.getElementById('sizeSlider').max = 400; // PCより上限も下げる
+            compass.updateSize(mobileDefaultSize);
+        }
     </script>
 </body>
 </html>
