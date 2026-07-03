@@ -2,24 +2,41 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MapLibre 恵方コンパス</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+    <title>恵方コンパス</title>
     <script src='https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.js'></script>
     <link href='https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.css' rel='stylesheet' />
     <style>
-        body { 
-            margin: 0; 
+        :root {
+            --panel-bg: #ffffff;
+            --panel-border: #d9d9d9;
+            --text-primary: #222222;
+            --text-secondary: #666666;
+            --accent: #2c3e50;
+            --accent-hover: #1a252f;
+            --ehou-bg: #f4f4f4;
+            --ehou-border: #c0392b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            margin: 0;
             padding: 0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Hiragino Sans, sans-serif;
+            color: var(--text-primary);
         }
-        
-        #map { 
-            position: absolute; 
-            top: 0; 
-            bottom: 0; 
-            width: 100%; 
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
         }
-        
+
         .compass-overlay {
             position: absolute;
             top: 50%;
@@ -29,211 +46,254 @@
             z-index: 100;
             transition: opacity 0.3s ease;
         }
-        
+
         .compass-canvas {
-            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.2));
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));
         }
-        
-        .control-panel {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            z-index: 200;
-        }
-        
-        .control-panel h3 {
-            margin: 0 0 10px 0;
-            color: #333;
-        }
-        
-        .control-group {
-            margin: 10px 0;
-        }
-        
-        .control-group label {
-            display: block;
-            margin-bottom: 5px;
-            color: #666;
-            font-size: 14px;
-        }
-        
-        .control-group input, .control-group button {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        
-        .control-group button {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            border: none;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        
-        .control-group button:hover {
-            transform: translateY(-1px);
-        }
-        
-        .ehou-info {
-            margin-top: 15px;
-            padding: 10px;
-            background: linear-gradient(135deg, #f093fb, #f5576c);
-            border-radius: 6px;
-            color: white;
-            text-align: center;
-        }
-        
-        .ehou-info .year {
-            font-size: 12px;
-            opacity: 0.9;
-        }
-        
-        .ehou-info .direction {
-            font-size: 20px;
-            font-weight: bold;
-            margin-top: 5px;
-        }
-        
+
         .location-marker {
-            width: 20px;
-            height: 20px;
-            background: #4285F4;
+            width: 16px;
+            height: 16px;
+            background: #2c6fbb;
             border: 3px solid white;
             border-radius: 50%;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
             z-index: 101;
         }
-        
-        .location-marker::before {
-            content: '';
+
+        /* --- コントロールパネル --- */
+        .control-panel {
             position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 40px;
-            height: 40px;
-            border: 2px solid #4285F4;
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-            animation: pulse 2s ease-out infinite;
-            opacity: 0.5;
+            top: 12px;
+            left: 12px;
+            width: 260px;
+            max-width: calc(100vw - 24px);
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.15);
+            z-index: 200;
+            max-height: calc(100vh - 24px);
+            overflow-y: auto;
         }
-        
-        @keyframes pulse {
-            0% {
-                transform: translate(-50%, -50%) scale(1);
-                opacity: 0.5;
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--panel-border);
+        }
+
+        .panel-header h3 {
+            margin: 0;
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .panel-toggle {
+            display: none;
+            border: none;
+            background: none;
+            font-size: 16px;
+            line-height: 1;
+            padding: 4px 6px;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+
+        .panel-body {
+            padding: 12px 14px 14px;
+        }
+
+        .control-group {
+            margin: 0 0 12px 0;
+        }
+
+        .control-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 4px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .control-group input[type="number"] {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid var(--panel-border);
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .control-group input[type="range"] {
+            width: 100%;
+        }
+
+        .control-group button {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--accent);
+            border-radius: 4px;
+            background: var(--accent);
+            color: white;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .control-group button:hover {
+            background: var(--accent-hover);
+        }
+
+        .ehou-info {
+            margin-top: 4px;
+            padding: 10px;
+            background: var(--ehou-bg);
+            border: 1px solid var(--panel-border);
+            border-left: 4px solid var(--ehou-border);
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .ehou-info .year {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .ehou-info .direction {
+            font-size: 20px;
+            font-weight: 700;
+            margin-top: 4px;
+            color: var(--text-primary);
+        }
+
+        /* --- モバイル対応 --- */
+        @media (max-width: 600px) {
+            .control-panel {
+                top: auto;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                width: 100%;
+                max-width: 100%;
+                border-radius: 12px 12px 0 0;
+                max-height: 60vh;
+                padding-bottom: env(safe-area-inset-bottom);
             }
-            100% {
-                transform: translate(-50%, -50%) scale(2);
-                opacity: 0;
+
+            .panel-toggle {
+                display: inline-block;
+            }
+
+            .panel-body.collapsed {
+                display: none;
+            }
+
+            /* ナビゲーションコントロールと重ならないよう上に余白 */
+            .maplibregl-ctrl-top-right {
+                top: 8px;
             }
         }
     </style>
 </head>
 <body>
     <div id="map"></div>
-    
+
     <div class="compass-overlay" id="compassOverlay">
         <canvas class="compass-canvas" id="compassCanvas" width="400" height="400"></canvas>
     </div>
-    
+
     <div class="location-marker"></div>
-    
-    <div class="control-panel">
-        <h3>🧭 恵方コンパス</h3>
-        
-        <div class="control-group">
-            <label for="yearInput">年を入力:</label>
-            <input type="number" id="yearInput" value="2025" min="0" max="9999">
+
+    <div class="control-panel" id="controlPanel">
+        <div class="panel-header">
+            <h3>恵方コンパス</h3>
+            <button class="panel-toggle" id="panelToggle" aria-label="パネル開閉">▾</button>
         </div>
-        
-        <div class="control-group">
-            <label for="opacitySlider">透明度:</label>
-            <input type="range" id="opacitySlider" min="0" max="100" value="70">
-        </div>
-        
-        <div class="control-group">
-            <label for="sizeSlider">サイズ:</label>
-            <input type="range" id="sizeSlider" min="200" max="600" value="400" step="50">
-        </div>
-        
-        <div class="control-group">
-            <button id="toggleCompass">コンパス表示/非表示</button>
-        </div>
-        
-        <div class="control-group">
-            <button id="getCurrentLocation">現在地を取得</button>
-        </div>
-        
-        <div class="ehou-info">
-            <div class="year">
-                <span id="yearDisplay">2025</span>年の恵方
+        <div class="panel-body" id="panelBody">
+            <div class="control-group">
+                <label for="yearInput">年を入力</label>
+                <input type="number" id="yearInput" value="2025" min="0" max="9999">
             </div>
-            <div class="direction" id="directionDisplay">-</div>
+
+            <div class="control-group">
+                <label for="opacitySlider">透明度</label>
+                <input type="range" id="opacitySlider" min="0" max="100" value="70">
+            </div>
+
+            <div class="control-group">
+                <label for="sizeSlider">サイズ</label>
+                <input type="range" id="sizeSlider" min="200" max="600" value="400" step="50">
+            </div>
+
+            <div class="control-group">
+                <button id="toggleCompass">コンパス表示/非表示</button>
+            </div>
+
+            <div class="ehou-info">
+                <div class="year">
+                    <span id="yearDisplay">2025</span>年の恵方
+                </div>
+                <div class="direction" id="directionDisplay">-</div>
+            </div>
         </div>
     </div>
-    
+
     <script>
         // 方位データ
         const directions = {
-            0: '北',
-            1: '北北東',
-            2: '北東',
-            3: '東北東',
-            4: '東',
-            5: '東南東',
-            6: '南東',
-            7: '南南東',
-            8: '南',
-            9: '南南西',
-            10: '南西',
-            11: '西南西',
-            12: '西',
-            13: '西北西',
-            14: '北西',
-            15: '北北西'
+            0: '北', 1: '北北東', 2: '北東', 3: '東北東',
+            4: '東', 5: '東南東', 6: '南東', 7: '南南東',
+            8: '南', 9: '南南西', 10: '南西', 11: '西南西',
+            12: '西', 13: '西北西', 14: '北西', 15: '北北西'
         };
-        
+
         // 恵方のルール（西暦下一桁 → ブロック番号）
         const ehouRules = {
-            0: 11,  // 西南西
-            1: 7,   // 南南東
-            2: 15,  // 北北西
-            3: 7,   // 南南東（修正）
-            4: 3,   // 東北東
-            5: 11,  // 西南西
-            6: 7,   // 南南東
-            7: 15,  // 北北西
-            8: 7,   // 南南東
-            9: 3    // 東北東
+            0: 11, 1: 7, 2: 15, 3: 7, 4: 3,
+            5: 11, 6: 7, 7: 15, 8: 7, 9: 3
         };
-        
-        // 恵方を計算
+
         function getEhouIndex(year) {
             const lastDigit = year % 10;
             return ehouRules[lastDigit];
         }
-        
+
         // MapLibre初期化
         const map = new maplibregl.Map({
             container: 'map',
             style: 'https://tile.openstreetmap.jp/styles/osm-bright-ja/style.json',
-            center: [139.7670, 35.6814], // 東京駅
+            center: [139.7670, 35.6814],
             zoom: 15,
             pitch: 0,
             bearing: 0
         });
-        
+
+        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+        // 現在地取得は標準のGeolocateControlに置き換え
+        const geolocate = new maplibregl.GeolocateControl({
+            positionOptions: { enableHighAccuracy: true },
+            trackUserLocation: true,
+            showUserLocation: true
+        });
+        map.addControl(geolocate, 'top-right');
+
+        // 標準コントロールが現在地マーカーを描画するため、
+        // 自前の location-marker は初期表示位置の目安としてのみ残す
+        // （GeolocateControl作動後は非表示にする）
+        geolocate.on('geolocate', () => {
+            const marker = document.querySelector('.location-marker');
+            if (marker) marker.style.display = 'none';
+        });
+
         // コンパス描画クラス
         class EhouCompass {
             constructor(canvas, year) {
@@ -243,67 +303,58 @@
                 this.rotation = 0;
                 this.size = 400;
             }
-            
+
             updateYear(year) {
                 this.year = year;
                 this.draw();
             }
-            
+
             updateRotation(rotation) {
                 this.rotation = rotation;
                 this.draw();
             }
-            
+
             updateSize(size) {
                 this.size = size;
                 this.canvas.width = size;
                 this.canvas.height = size;
                 this.draw();
             }
-            
+
             draw() {
                 const ctx = this.ctx;
                 const centerX = this.size / 2;
                 const centerY = this.size / 2;
                 const outerRadius = this.size * 0.4;
                 const innerRadius = this.size * 0.1;
-                
-                // キャンバスをクリア
+
                 ctx.clearRect(0, 0, this.size, this.size);
-                
-                // 保存して回転を適用
+
                 ctx.save();
                 ctx.translate(centerX, centerY);
                 ctx.rotate(this.rotation * Math.PI / 180);
                 ctx.translate(-centerX, -centerY);
-                
+
                 const ehouIndex = getEhouIndex(this.year);
-                const rotationOffset = -11.25; // 北を真上に
-                
-                // 16分割のセグメントを描画
+                const rotationOffset = -11.25;
+
                 for (let i = 0; i < 16; i++) {
                     const startAngle = (i * 22.5 + rotationOffset - 90) * Math.PI / 180;
                     const endAngle = ((i + 1) * 22.5 + rotationOffset - 90) * Math.PI / 180;
-                    
+
                     ctx.beginPath();
                     ctx.moveTo(centerX, centerY);
                     ctx.arc(centerX, centerY, outerRadius, startAngle, endAngle);
                     ctx.lineTo(centerX + innerRadius * Math.cos(endAngle), centerY + innerRadius * Math.sin(endAngle));
                     ctx.arc(centerX, centerY, innerRadius, endAngle, startAngle, true);
                     ctx.closePath();
-                    
-                    // 恵方の場合は赤く塗る
+
                     if (i === ehouIndex) {
-                        ctx.fillStyle = 'rgba(255, 107, 107, 0.8)';
+                        ctx.fillStyle = 'rgba(192, 57, 43, 0.75)';
                         ctx.fill();
-                        
-                        // 光る効果を追加
-                        ctx.shadowColor = '#ff6b6b';
-                        ctx.shadowBlur = 20;
-                        ctx.strokeStyle = '#ff3333';
-                        ctx.lineWidth = 3;
+                        ctx.strokeStyle = '#c0392b';
+                        ctx.lineWidth = 2;
                         ctx.stroke();
-                        ctx.shadowBlur = 0;
                     } else {
                         ctx.fillStyle = 'rgba(240, 240, 240, 0.3)';
                         ctx.fill();
@@ -312,22 +363,20 @@
                         ctx.stroke();
                     }
                 }
-                
-                // 中心の白い円
+
                 ctx.beginPath();
                 ctx.arc(centerX, centerY, innerRadius, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
                 ctx.fill();
                 ctx.strokeStyle = 'rgba(100, 100, 100, 0.8)';
                 ctx.lineWidth = 2;
                 ctx.stroke();
-                
-                // 方位文字を描画
+
                 ctx.fillStyle = 'rgba(50, 50, 50, 0.9)';
                 ctx.font = `bold ${this.size * 0.04}px sans-serif`;
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                
+
                 const textRadius = outerRadius + 20;
                 const cardinals = [
                     { text: '北', angle: -90 },
@@ -335,94 +384,70 @@
                     { text: '南', angle: 90 },
                     { text: '西', angle: 180 }
                 ];
-                
+
                 cardinals.forEach(({ text, angle }) => {
                     const rad = angle * Math.PI / 180;
                     const x = centerX + textRadius * Math.cos(rad);
                     const y = centerY + textRadius * Math.sin(rad);
-                    
-                    // 文字の背景
+
                     ctx.save();
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
                     ctx.beginPath();
                     ctx.arc(x, y, 15, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.restore();
-                    
-                    // 文字
+
                     ctx.fillText(text, x, y);
                 });
-                
+
                 ctx.restore();
             }
         }
-        
-        // コンパス初期化
+
         const compassCanvas = document.getElementById('compassCanvas');
         const compass = new EhouCompass(compassCanvas, 2025);
         compass.draw();
-        
-        // 地図の回転に連動
+
         map.on('rotate', () => {
             const bearing = map.getBearing();
             compass.updateRotation(-bearing);
         });
-        
-        // コントロールのイベント設定
+
         document.getElementById('yearInput').addEventListener('input', (e) => {
             const year = parseInt(e.target.value);
             compass.updateYear(year);
-            
-            // 恵方情報を更新
             document.getElementById('yearDisplay').textContent = year;
             const ehouIndex = getEhouIndex(year);
             document.getElementById('directionDisplay').textContent = directions[ehouIndex];
         });
-        
+
         document.getElementById('opacitySlider').addEventListener('input', (e) => {
             const opacity = e.target.value / 100;
             document.getElementById('compassOverlay').style.opacity = opacity;
         });
-        
+
         document.getElementById('sizeSlider').addEventListener('input', (e) => {
             const size = parseInt(e.target.value);
             compass.updateSize(size);
         });
-        
+
         document.getElementById('toggleCompass').addEventListener('click', () => {
             const overlay = document.getElementById('compassOverlay');
             overlay.style.display = overlay.style.display === 'none' ? 'block' : 'none';
         });
-        
-        // 現在地取得
-        document.getElementById('getCurrentLocation').addEventListener('click', () => {
-            if (!navigator.geolocation) {
-                alert('お使いのブラウザは位置情報に対応していません');
-                return;
-            }
-            
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    const { longitude, latitude } = position.coords;
-                    map.flyTo({
-                        center: [longitude, latitude],
-                        zoom: 16,
-                        essential: true
-                    });
-                },
-                (error) => {
-                    alert('位置情報の取得に失敗しました: ' + error.message);
-                }
-            );
+
+        // モバイルでのパネル開閉
+        const panelToggle = document.getElementById('panelToggle');
+        const panelBody = document.getElementById('panelBody');
+        panelToggle.addEventListener('click', () => {
+            const collapsed = panelBody.classList.toggle('collapsed');
+            panelToggle.textContent = collapsed ? '▴' : '▾';
         });
-        
+
         // 初期の恵方情報を設定
         const initialYear = 2025;
-        const ehouIndex = getEhouIndex(initialYear);
-        document.getElementById('directionDisplay').textContent = directions[ehouIndex];
-        
-        // ナビゲーションコントロール追加
-        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+        const initialEhouIndex = getEhouIndex(initialYear);
+        document.getElementById('directionDisplay').textContent = directions[initialEhouIndex];
     </script>
 </body>
 </html>
