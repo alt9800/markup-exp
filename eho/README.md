@@ -12,3 +12,6 @@
 [恵方シミュレータ](./eho-simu/)
 
 年毎の恵方を表示するシンプルなアプリケーション
+
+
+[地図とOrientationAPI](./Orientation)

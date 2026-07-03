@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+    <title>方向インジケータ</title>
+    <script src='https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.css' rel='stylesheet' />
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Hiragino Sans, sans-serif;
+            color: #222222;
+        }
+
+        /* 地図とデバッグパネルを重ねず、上下に完全分割する。
+           画面サイズに関わらずオーバーラップが起きないよう、
+           絶対配置のオーバーレイではなくflexコンテナで領域を分けている。 */
+        body {
+            display: flex;
+            flex-direction: column;
+        }
+
+        #map {
+            position: relative;
+            flex: 1 1 auto;
+            min-height: 0;
+        }
+
+        .location-marker {
+            width: 16px;
+            height: 16px;
+            background: #2c6fbb;
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 101;
+            pointer-events: none;
+        }
+
+        .panel {
+            flex: 0 0 auto;
+            width: 100%;
+            max-height: 45vh;
+            overflow-y: auto;
+            background: #ffffff;
+            border-top: 1px solid #d9d9d9;
+            font-size: 13px;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        .panel-row {
+            padding: 8px 12px;
+            border-bottom: 1px solid #eeeeee;
+        }
+
+        .panel-row:last-child {
+            border-bottom: none;
+        }
+
+        button {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #2c3e50;
+            border-radius: 4px;
+            background: #2c3e50;
+            color: white;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+
+        .status {
+            margin-top: 6px;
+            color: #666666;
+        }
+
+        .status.active {
+            color: #2c6fbb;
+        }
+
+        .status.error {
+            color: #c0392b;
+        }
+
+        table.debug {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        table.debug td {
+            padding: 2px 0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+
+        table.debug td:first-child {
+            color: #666666;
+            width: 45%;
+        }
+    </style>
+</head>
+<body>
+    <div id="map">
+        <div class="location-marker"></div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-row">
+            <button id="enableOrientation">端末の向きを使う</button>
+            <div class="status" id="sensorStatus">未使用</div>
+        </div>
+        <div class="panel-row">
+            <table class="debug">
+                <tr><td>event種別</td><td id="dbgEventType">-</td></tr>
+                <tr><td>alpha</td><td id="dbgAlpha">-</td></tr>
+                <tr><td>beta</td><td id="dbgBeta">-</td></tr>
+                <tr><td>gamma</td><td id="dbgGamma">-</td></tr>
+                <tr><td>absolute</td><td id="dbgAbsolute">-</td></tr>
+                <tr><td>webkitCompassHeading</td><td id="dbgWebkit">-</td></tr>
+                <tr><td>webkitCompassAccuracy</td><td id="dbgWebkitAccuracy">-</td></tr>
+                <tr><td>算出heading</td><td id="dbgComputed">-</td></tr>
+                <tr><td>map bearing</td><td id="dbgBearing">-</td></tr>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // 地図はbearingをDeviceOrientationEventの値に追従させて回転させる。
+        // 別途コンパス盤面を描画するのではなく、地図そのものの向きで方向を示す。
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: 'https://tile.openstreetmap.jp/styles/osm-bright-ja/style.json',
+            center: [139.7670, 35.6814],
+            zoom: 15,
+            pitch: 0,
+            bearing: 0,
+            dragRotate: false,
+            touchPitch: false
+        });
+
+        map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
+        const geolocate = new maplibregl.GeolocateControl({
+            positionOptions: { enableHighAccuracy: true },
+            trackUserLocation: true,
+            showUserLocation: true
+        });
+        map.addControl(geolocate, 'top-right');
+
+        geolocate.on('geolocate', () => {
+            const marker = document.querySelector('.location-marker');
+            if (marker) marker.style.display = 'none';
+        });
+
+        // --- DeviceOrientationEvent関連 ---
+        // Android: deviceorientationabsoluteが発火する場合、360 - alphaが真北基準の近似値になる。
+        // 発火しない環境ではalphaをそのまま用いるため、真北基準である保証はない。
+        // iOS Safari: webkitCompassHeadingが真北基準の値を直接返す(変換不要)。
+        // iOS 13以降はrequestPermission()をユーザー操作内で呼ぶ必要があり、HTTPS環境が前提。
+
+        const enableBtn = document.getElementById('enableOrientation');
+        const sensorStatus = document.getElementById('sensorStatus');
+
+        const dbgEventType = document.getElementById('dbgEventType');
+        const dbgAlpha = document.getElementById('dbgAlpha');
+        const dbgBeta = document.getElementById('dbgBeta');
+        const dbgGamma = document.getElementById('dbgGamma');
+        const dbgAbsolute = document.getElementById('dbgAbsolute');
+        const dbgWebkit = document.getElementById('dbgWebkit');
+        const dbgWebkitAccuracy = document.getElementById('dbgWebkitAccuracy');
+        const dbgComputed = document.getElementById('dbgComputed');
+        const dbgBearing = document.getElementById('dbgBearing');
+
+        let headingHistory = [];
+        const SMOOTHING_WINDOW = 5;
+
+        function smoothHeading(newHeading) {
+            headingHistory.push(newHeading);
+            if (headingHistory.length > SMOOTHING_WINDOW) {
+                headingHistory.shift();
+            }
+            // 0/360度境界をまたぐ場合に単純平均が破綻するため円環統計(ベクトル平均)で処理する
+            const radians = headingHistory.map(h => h * Math.PI / 180);
+            const sumSin = radians.reduce((a, r) => a + Math.sin(r), 0);
+            const sumCos = radians.reduce((a, r) => a + Math.cos(r), 0);
+            const avgRad = Math.atan2(sumSin / radians.length, sumCos / radians.length);
+            let avgDeg = avgRad * 180 / Math.PI;
+            if (avgDeg < 0) avgDeg += 360;
+            return avgDeg;
+        }
+
+        function fmt(value, digits = 1) {
+            return typeof value === 'number' && !Number.isNaN(value) ? value.toFixed(digits) : '-';
+        }
+
+        function handleOrientation(event) {
+            dbgEventType.textContent = event.type;
+            dbgAlpha.textContent = fmt(event.alpha);
+            dbgBeta.textContent = fmt(event.beta);
+            dbgGamma.textContent = fmt(event.gamma);
+            dbgAbsolute.textContent = String(event.absolute);
+            dbgWebkit.textContent = fmt(event.webkitCompassHeading);
+            dbgWebkitAccuracy.textContent = fmt(event.webkitCompassAccuracy);
+
+            let heading = null;
+
+            if (typeof event.webkitCompassHeading === 'number') {
+                heading = event.webkitCompassHeading;
+            } else if (event.absolute === true && typeof event.alpha === 'number') {
+                heading = (360 - event.alpha) % 360;
+            } else if (typeof event.alpha === 'number') {
+                heading = (360 - event.alpha) % 360;
+                sensorStatus.textContent = '反映中(方位の絶対精度は未保証)';
+                sensorStatus.className = 'status active';
+            }
+
+            if (heading === null) return;
+
+            const smoothed = smoothHeading(heading);
+            dbgComputed.textContent = fmt(smoothed);
+
+            // 地図bearingは「進行方向が上」になる向きなので、そのままheadingを渡す
+            map.setBearing(smoothed);
+            dbgBearing.textContent = fmt(map.getBearing());
+        }
+
+        function startOrientationTracking() {
+            const eventName = 'ondeviceorientationabsolute' in window
+                ? 'deviceorientationabsolute'
+                : 'deviceorientation';
+
+            window.addEventListener(eventName, handleOrientation, true);
+            sensorStatus.textContent = '反映中';
+            sensorStatus.className = 'status active';
+            enableBtn.disabled = true;
+            enableBtn.textContent = '取得中';
+        }
+
+        enableBtn.addEventListener('click', async () => {
+            if (typeof DeviceOrientationEvent === 'undefined') {
+                sensorStatus.textContent = 'この端末/ブラウザは方位センサーに対応していません';
+                sensorStatus.className = 'status error';
+                return;
+            }
+
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission === 'granted') {
+                        startOrientationTracking();
+                    } else {
+                        sensorStatus.textContent = '許可されませんでした';
+                        sensorStatus.className = 'status error';
+                    }
+                } catch (err) {
+                    sensorStatus.textContent = '許可の取得に失敗しました(HTTPS環境が必要です)';
+                    sensorStatus.className = 'status error';
+                }
+            } else {
+                startOrientationTracking();
+            }
+        });
+    </script>
+</body>
+</html>
