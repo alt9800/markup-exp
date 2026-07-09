@@ -12,3 +12,4 @@ Try and error regarding markup
 |[mapintimeline](./map-in-timeline)|地図domのタイムライン埋め込みの夢を|
 |[photo2map](./photo2map)|ドラッグ&ドロップで写真を地図上に表示できるGPS確認用アプリ|
 |[editGeotag](./editGeotag)|ブラウザでジオタグの調整をしてDLするアプリ|
+|[WebAR-test](./WebAR-test)|VPSの卵みたいな...|

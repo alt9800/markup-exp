@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>ドアAR (WebAR / カメラAPI + マークアップ版)</title>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+
+        /* カメラ映像: getUserMedia を背景として敷く */
+        #camera-feed {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;   /* 検出座標→画面座標の変換もこの cover 規則に合わせる */
+            z-index: 0;
+        }
+
+        /* A-Frame のキャンバスを透過で重ねる */
+        a-scene {
+            position: fixed !important;
+            inset: 0;
+            z-index: 1;
+        }
+
+        #start-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, #10101c, #1c2340);
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            text-align: center;
+            padding: 24px;
+        }
+        #start-overlay.hidden { display: none; }
+        #start-button {
+            padding: 18px 48px;
+            font-size: 22px;
+            font-weight: bold;
+            color: #fff;
+            background: linear-gradient(135deg, #f5a623, #e0533d);
+            border: none;
+            border-radius: 50px;
+        }
+        #start-overlay p {
+            margin-top: 20px;
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+            line-height: 1.8;
+        }
+
+        #hud {
+            position: fixed;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 5;
+            background: rgba(0,0,0,0.65);
+            color: #fff;
+            font-family: sans-serif;
+            font-size: 14px;
+            padding: 10px 20px;
+            border-radius: 20px;
+            max-width: 92%;
+            text-align: center;
+            pointer-events: none;
+        }
+        #hud.hidden { display: none; }
+
+        #redetect {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 5;
+            padding: 10px 26px;
+            font-size: 15px;
+            color: #fff;
+            background: rgba(0,0,0,0.55);
+            border: 1px solid rgba(255,255,255,0.4);
+            border-radius: 20px;
+        }
+        #redetect.hidden { display: none; }
+
+        /* 検出中の矩形ガイド (画面座標に直接描く) */
+        #detect-box {
+            position: fixed;
+            z-index: 4;
+            border: 3px solid #00ff88;
+            border-radius: 4px;
+            box-shadow: 0 0 18px rgba(0,255,136,0.6);
+            pointer-events: none;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <video id="camera-feed" autoplay muted playsinline></video>
+    <div id="detect-box"></div>
+
+    <div id="start-overlay">
+        <h1 style="font-size:26px; margin-bottom:16px;">🚪 ドアAR (WebAR版)</h1>
+        <button id="start-button">カメラを起動</button>
+        <p>
+            WebXR不使用: getUserMedia + DeviceOrientation +<br>
+            素朴なエッジ検出だけで作ったプリミティブAR<br>
+            iPhone / Android どちらのブラウザでも動きます<br><br>
+            ドア全体が画面に入るように構えてください<br>
+            (検出できないときは画面のドアをタップ)
+        </p>
+    </div>
+
+    <div id="hud" class="hidden"><span id="hud-text"></span></div>
+    <button id="redetect" class="hidden">再検出</button>
+
+    <!--
+      シーンはマークアップで宣言する。
+      ドア枠 = 3本の a-box、開口部 = a-plane、ボール放出 = ball-fountain コンポーネント。
+      カメラ映像はシーンの「背景」であり、A-Frame は透過キャンバスとして上に重なるだけ。
+    -->
+    <a-scene embedded
+             renderer="alpha: true; antialias: true"
+             vr-mode-ui="enabled: false"
+             device-orientation-permission-ui="enabled: false"
+             background="transparent: true">
+
+        <a-entity id="rig">
+            <a-camera id="ar-camera"
+                      look-controls="magicWindowTrackingEnabled: true; touchEnabled: false; mouseEnabled: false"
+                      wasd-controls-enabled="false"
+                      fov="60"></a-camera>
+        </a-entity>
+
+        <a-entity light="type: hemisphere; color: #ffffff; groundColor: #445566; intensity: 1.0"></a-entity>
+        <a-entity light="type: directional; intensity: 1.1" position="1 4 2"></a-entity>
+
+        <!-- ドア一式: door-placer が検出結果に応じて position/rotation/scale を与える -->
+        <a-entity id="door" visible="false">
+            <!-- 上辺 -->
+            <a-box class="glow" position="0 2.03 0" width="1.02" height="0.06" depth="0.06"
+                   material="color: #111111; emissive: #00ffff; emissiveIntensity: 1"></a-box>
+            <!-- 左辺 -->
+            <a-box class="glow" position="-0.48 1 0" width="0.06" height="2.0" depth="0.06"
+                   material="color: #111111; emissive: #00ffff; emissiveIntensity: 1"></a-box>
+            <!-- 右辺 -->
+            <a-box class="glow" position="0.48 1 0" width="0.06" height="2.0" depth="0.06"
+                   material="color: #111111; emissive: #00ffff; emissiveIntensity: 1"></a-box>
+            <!-- 開口部 (じわっと暗転する「向こう側」) -->
+            <a-plane id="portal" position="0 1 -0.01" width="0.9" height="2.0"
+                     material="color: #000022; transparent: true; opacity: 0; side: double"></a-plane>
+            <!-- ボール放出器 -->
+            <a-entity id="fountain"
+                      ball-fountain="maxBalls: 35; interval: 130; delay: 3000; enabled: false"></a-entity>
+        </a-entity>
+    </a-scene>
+
+    <script>
+    // =====================================================================
+    // 設定
+    // =====================================================================
+    const CONFIG = {
+        DOOR_REAL_HEIGHT: 2.0,   // ドアの実寸高さの仮定 [m] → 距離推定に使う
+        DOOR_REAL_WIDTH: 0.9,
+        CAMERA_FOV_DEG: 60,      // スマホ背面カメラの縦FOVの仮定
+        PROC_WIDTH: 160,         // 画像処理の解像度 (幅)
+        DETECT_FPS: 6,           // 検出処理の頻度
+        STABLE_FRAMES: 5,        // 連続N回同じ矩形なら確定
+        TAP_DISTANCE: 2.0,       // タップ配置時の距離 [m]
+        GLOW_DURATION: 3000,
+    };
+
+    const hud = document.getElementById('hud');
+    const hudText = document.getElementById('hud-text');
+    function setHud(t) { hud.classList.remove('hidden'); hudText.textContent = t; }
+
+    // =====================================================================
+    // ball-fountain コンポーネント (物理は自前: 重力・床バウンド・摩擦・転がり)
+    // 床の高さ = ドアエンティティのローカル y=0 平面 (配置時に実床へ合わせる)
+    // =====================================================================
+    AFRAME.registerComponent('ball-fountain', {
+        schema: {
+            maxBalls: { default: 35 },
+            interval: { default: 130 },   // 生成間隔 [ms]
+            delay: { default: 3000 },     // 有効化からの待ち [ms]
+            enabled: { default: false },
+        },
+        init() {
+            this.balls = [];
+            this.lastSpawn = 0;
+            this.enabledAt = null;
+            this.colors = ['#ff5c5c', '#ffc14d', '#5cd67a', '#5ca8ff', '#c45cff', '#ff8ee0'];
+        },
+        update(old) {
+            if (this.data.enabled && !old.enabled) this.enabledAt = performance.now();
+            if (!this.data.enabled) this.reset();
+        },
+        reset() {
+            for (const b of this.balls) b.el.remove();
+            this.balls = [];
+            this.enabledAt = null;
+        },
+        spawn() {
+            const r = 0.04 + Math.random() * 0.04;
+            const el = document.createElement('a-sphere');
+            el.setAttribute('radius', r);
+            el.setAttribute('color', this.colors[(Math.random() * this.colors.length) | 0]);
+            el.setAttribute('material', 'roughness: 0.35; metalness: 0.1');
+            // ドアローカル座標: 開口部の中 (少し奥) から
+            el.object3D.position.set(
+                (Math.random() - 0.5) * CONFIG.DOOR_REAL_WIDTH * 0.8,
+                r + Math.random() * CONFIG.DOOR_REAL_HEIGHT * 0.5,
+                -0.15
+            );
+            this.el.appendChild(el);
+            this.balls.push({
+                el, r, age: 0,
+                v: new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.8,       // 横散らばり
+                    Math.random() * 0.4,
+                    0.8 + Math.random() * 1.6           // +Z = ドア法線 = 手前
+                ),
+            });
+        },
+        tick(time, dtMs) {
+            if (!this.data.enabled || this.enabledAt === null) return;
+            if (performance.now() - this.enabledAt < this.data.delay) return;
+            const dt = Math.min(dtMs / 1000, 0.05);
+
+            if (this.balls.length < this.data.maxBalls &&
+                performance.now() - this.lastSpawn > this.data.interval) {
+                this.lastSpawn = performance.now();
+                this.spawn();
+            }
+
+            for (let i = this.balls.length - 1; i >= 0; i--) {
+                const b = this.balls[i];
+                b.age += dt;
+                b.v.y -= 9.8 * dt;
+                const p = b.el.object3D.position;
+                p.addScaledVector(b.v, dt);
+
+                // 床 (ローカル y=0) でバウンド
+                if (p.y < b.r) {
+                    p.y = b.r;
+                    if (b.v.y < 0) b.v.y = -b.v.y * 0.55;
+                    if (Math.abs(b.v.y) < 0.15) b.v.y = 0;
+                    b.v.x *= 0.985;
+                    b.v.z *= 0.985;
+                }
+
+                // 転がり回転
+                const speed = Math.hypot(b.v.x, b.v.z);
+                if (speed > 0.01) {
+                    const axis = new THREE.Vector3(b.v.z, 0, -b.v.x).normalize();
+                    b.el.object3D.rotateOnWorldAxis(axis, (speed / b.r) * dt);
+                }
+
+                if (b.age > 20 || p.length() > 8) {
+                    b.el.remove();
+                    this.balls.splice(i, 1);
+                }
+            }
+        },
+    });
+
+    // =====================================================================
+    // glow-pulse: 枠の脈動 + 開口部の暗転
+    // =====================================================================
+    AFRAME.registerComponent('glow-pulse', {
+        init() { this.startedAt = performance.now(); },
+        tick(time) {
+            const pulse = Math.sin(time * 0.004) * 0.5 + 1.0;
+            this.el.querySelectorAll('.glow').forEach(box => {
+                const mesh = box.getObject3D('mesh');
+                if (mesh) mesh.material.emissiveIntensity = pulse;
+            });
+            const portal = this.el.querySelector('#portal')?.getObject3D('mesh');
+            if (portal) {
+                const t = Math.min((performance.now() - this.startedAt) / CONFIG.GLOW_DURATION, 1);
+                portal.material.opacity = t * 0.55;
+            }
+        },
+    });
+
+    // =====================================================================
+    // プリミティブなドア検出
+    // Sobel縦エッジ → 列ヒストグラムのピーク対 → 上辺の横エッジ確認、だけ。
+    // MLもSLAMも使わない「素朴な推論」。誤検出はタップ配置でリカバリする。
+    // =====================================================================
+    const video = document.getElementById('camera-feed');
+    const procCanvas = document.createElement('canvas');
+    const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
+
+    function grayscale(imageData) {
+        const { data, width, height } = imageData;
+        const g = new Float32Array(width * height);
+        for (let i = 0; i < width * height; i++) {
+            g[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+        }
+        return g;
+    }
+
+    // 検出結果: ビデオ座標系の矩形 {x, y, w, h} または null
+    function detectDoorRect() {
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (!vw) return null;
+        const W = CONFIG.PROC_WIDTH;
+        const H = Math.round(W * vh / vw);
+        procCanvas.width = W;
+        procCanvas.height = H;
+        procCtx.drawImage(video, 0, 0, W, H);
+        const g = grayscale(procCtx.getImageData(0, 0, W, H));
+
+        // Sobel (縦エッジ gx / 横エッジ gy)
+        const colScore = new Float32Array(W);
+        const gy = new Float32Array(W * H);
+        for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+                const i = y * W + x;
+                const gxv = (g[i - W + 1] + 2 * g[i + 1] + g[i + W + 1])
+                          - (g[i - W - 1] + 2 * g[i - 1] + g[i + W - 1]);
+                const gyv = (g[i + W - 1] + 2 * g[i + W] + g[i + W + 1])
+                          - (g[i - W - 1] + 2 * g[i - W] + g[i - W + 1]);
+                if (Math.abs(gxv) > 60) colScore[x] += 1;
+                gy[i] = Math.abs(gyv);
+            }
+        }
+
+        // 列ピーク抽出 (非最大抑制つき)
+        const peaks = [];
+        for (let x = 2; x < W - 2; x++) {
+            if (colScore[x] > H * 0.25 &&
+                colScore[x] >= colScore[x - 1] && colScore[x] >= colScore[x + 1] &&
+                colScore[x] >= colScore[x - 2] && colScore[x] >= colScore[x + 2]) {
+                peaks.push(x);
+            }
+        }
+
+        // ピーク対からドア候補を選ぶ
+        let best = null;
+        for (let a = 0; a < peaks.length; a++) {
+            for (let b = a + 1; b < peaks.length; b++) {
+                const x1 = peaks[a], x2 = peaks[b];
+                const w = x2 - x1;
+                if (w < W * 0.15 || w > W * 0.7) continue;
+
+                // 2本の縦線の間で、上半分にある強い横エッジ = 上辺
+                let topRow = -1, topStrength = 0;
+                for (let y = 2; y < H * 0.6; y++) {
+                    let s = 0;
+                    for (let x = x1; x <= x2; x++) s += gy[y * W + x];
+                    if (s > topStrength) { topStrength = s; topRow = y; }
+                }
+                if (topRow < 0 || topStrength < w * 40) continue;
+
+                const h = H - topRow;                // 下辺は画面下端まで、と仮定
+                const aspect = h / w;
+                if (aspect < 1.3 || aspect > 4.0) continue;  // ドアらしい縦長
+
+                const score = (colScore[x1] + colScore[x2]) * (1 + topStrength / (w * 255));
+                if (!best || score > best.score) {
+                    best = { x: x1, y: topRow, w, h, score };
+                }
+            }
+        }
+        if (!best) return null;
+
+        // 処理解像度 → ビデオ解像度へスケール
+        const s = vw / W;
+        return { x: best.x * s, y: best.y * s, w: best.w * s, h: best.h * s };
+    }
+
+    // object-fit: cover のビデオ座標 → 画面座標
+    function videoToScreen(r) {
+        const vw = video.videoWidth, vh = video.videoHeight;
+        const sw = innerWidth, sh = innerHeight;
+        const scale = Math.max(sw / vw, sh / vh);
+        const ox = (sw - vw * scale) / 2;
+        const oy = (sh - vh * scale) / 2;
+        return { x: r.x * scale + ox, y: r.y * scale + oy, w: r.w * scale, h: r.h * scale };
+    }
+
+    // =====================================================================
+    // 画面矩形 → 3D配置
+    // 「ドアの実寸2.0m」という仮定 + ピンホールカメラモデルで距離を逆算し、
+    // DeviceOrientation で回るA-Frameカメラのワールド座標へ焼き付ける。
+    // これが GPS も SLAM も使わない「幾何で置く」の正体 (生駒の鳥居と同じ発想)。
+    // =====================================================================
+    function placeDoorFromScreenRect(rect) {
+        const sceneEl = document.querySelector('a-scene');
+        const camObj = document.getElementById('ar-camera').object3D;
+        const doorEl = document.getElementById('door');
+
+        const sh = innerHeight, sw = innerWidth;
+        const focalPx = (sh / 2) / Math.tan(THREE.MathUtils.degToRad(CONFIG.CAMERA_FOV_DEG) / 2);
+
+        // 実寸仮定から距離を推定
+        const dist = CONFIG.DOOR_REAL_HEIGHT * focalPx / rect.h;
+
+        // 画面中心からのずれ → カメラ空間の方向
+        const cx = rect.x + rect.w / 2 - sw / 2;
+        const cy = rect.y + rect.h / 2 - sh / 2;
+        const camSpace = new THREE.Vector3(
+            (cx / focalPx) * dist,
+            -(cy / focalPx) * dist,
+            -dist
+        );
+
+        // カメラ空間 → ワールド座標に焼き付け (以後はワールドに固定)
+        camObj.updateMatrixWorld(true);
+        const world = camSpace.applyMatrix4(camObj.matrixWorld);
+
+        // ドア原点 = 下端中央。矩形中心は高さの半分上にある
+        world.y -= CONFIG.DOOR_REAL_HEIGHT / 2;
+
+        // カメラの方を向ける (yawのみ)
+        const camPos = new THREE.Vector3();
+        camObj.getWorldPosition(camPos);
+        const yaw = Math.atan2(camPos.x - world.x, camPos.z - world.z);
+
+        doorEl.object3D.position.copy(world);
+        doorEl.object3D.rotation.set(0, yaw, 0);
+        doorEl.setAttribute('visible', 'true');
+        doorEl.setAttribute('glow-pulse', '');
+        document.getElementById('fountain').setAttribute('ball-fountain', 'enabled', true);
+
+        placed = true;
+        detectBox.style.display = 'none';
+        document.getElementById('redetect').classList.remove('hidden');
+        setHud('✨ ドアを配置しました — まもなくボールが溢れます');
+    }
+
+    // =====================================================================
+    // メインフロー
+    // =====================================================================
+    const detectBox = document.getElementById('detect-box');
+    let placed = false;
+    let stableCount = 0;
+    let lastRect = null;
+    let detectTimer = null;
+
+    function rectsSimilar(a, b) {
+        if (!a || !b) return false;
+        const tol = Math.max(a.w, a.h) * 0.25;
+        return Math.abs(a.x - b.x) < tol && Math.abs(a.y - b.y) < tol &&
+               Math.abs(a.w - b.w) < tol && Math.abs(a.h - b.h) < tol;
+    }
+
+    function detectLoop() {
+        if (placed) return;
+        const rect = detectDoorRect();
+        if (rect) {
+            const sr = videoToScreen(rect);
+            detectBox.style.display = 'block';
+            detectBox.style.left = `${sr.x}px`;
+            detectBox.style.top = `${sr.y}px`;
+            detectBox.style.width = `${sr.w}px`;
+            detectBox.style.height = `${sr.h}px`;
+
+            stableCount = rectsSimilar(rect, lastRect) ? stableCount + 1 : 1;
+            lastRect = rect;
+            setHud(`🚪 ドア候補を検出中… (${stableCount}/${CONFIG.STABLE_FRAMES})`);
+
+            if (stableCount >= CONFIG.STABLE_FRAMES) {
+                placeDoorFromScreenRect(sr);
+                return;
+            }
+        } else {
+            detectBox.style.display = 'none';
+            stableCount = 0;
+            lastRect = null;
+            setHud('ドア全体を画面に収めてください (またはドアをタップ)');
+        }
+        detectTimer = setTimeout(detectLoop, 1000 / CONFIG.DETECT_FPS);
+    }
+
+    // タップ配置フォールバック: タップ点を中心に固定距離でドアを置く
+    function onTap(ev) {
+        if (placed || !video.srcObject) return;
+        const focalPx = (innerHeight / 2) /
+            Math.tan(THREE.MathUtils.degToRad(CONFIG.CAMERA_FOV_DEG) / 2);
+        const hPx = CONFIG.DOOR_REAL_HEIGHT * focalPx / CONFIG.TAP_DISTANCE;
+        const wPx = hPx * CONFIG.DOOR_REAL_WIDTH / CONFIG.DOOR_REAL_HEIGHT;
+        placeDoorFromScreenRect({
+            x: ev.clientX - wPx / 2, y: ev.clientY - hPx / 2, w: wPx, h: hPx
+        });
+    }
+
+    function resetDoor() {
+        placed = false;
+        stableCount = 0;
+        lastRect = null;
+        const doorEl = document.getElementById('door');
+        doorEl.setAttribute('visible', 'false');
+        doorEl.removeAttribute('glow-pulse');
+        document.getElementById('fountain').setAttribute('ball-fountain', 'enabled', false);
+        document.getElementById('redetect').classList.add('hidden');
+        detectLoop();
+    }
+
+    async function start() {
+        // iOS: DeviceOrientation はユーザー操作起点の許可が必要
+        if (typeof DeviceOrientationEvent !== 'undefined' &&
+            typeof DeviceOrientationEvent.requestPermission === 'function') {
+            try { await DeviceOrientationEvent.requestPermission(); } catch (e) { /* 拒否時も続行 */ }
+        }
+
+        try {
+            video.srcObject = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 1280 } },
+                audio: false,
+            });
+            await video.play();
+        } catch (e) {
+            alert(`カメラを起動できません: ${e.message}\nHTTPSでアクセスしているか確認してください。`);
+            return;
+        }
+
+        document.getElementById('start-overlay').classList.add('hidden');
+        window.addEventListener('click', onTap);
+        detectLoop();
+    }
+
+    document.getElementById('start-button').addEventListener('click', start);
+    document.getElementById('redetect').addEventListener('click', (e) => {
+        e.stopPropagation();
+        resetDoor();
+    });
+    </script>
+</body>
+</html>
