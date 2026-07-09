@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>ワイヤーフレーム</title>
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #000;
+                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+        #camera-feed {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+        }
+
+        /* エッジの発光レイヤ。毎フレーム描き直すのでトラッキング不要 */
+        #edge-layer {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+            filter: blur(0.6px);
+        }
+
+        #start-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: #14141e;
+            color: #fff;
+            text-align: center;
+            padding: 24px;
+        }
+        #start-overlay.hidden { display: none; }
+        #start-button {
+            padding: 18px 48px;
+            font-size: 22px;
+            font-weight: bold;
+            color: #111;
+            background: #e8e8e8;
+            border: none;
+            border-radius: 8px;
+        }
+        #start-overlay p {
+            margin-top: 20px;
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+            line-height: 1.8;
+        }
+
+        #controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 5;
+            background: rgba(0,0,0,0.55);
+            color: #fff;
+            font-size: 13px;
+            padding: 10px 18px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        #controls.hidden { display: none; }
+        #controls input[type="range"] { width: 140px; }
+    </style>
+</head>
+<body>
+    <video id="camera-feed" autoplay muted playsinline></video>
+    <canvas id="edge-layer"></canvas>
+
+    <div id="start-overlay">
+        <h1 style="font-size:26px; margin-bottom:16px;">ワイヤーフレーム</h1>
+        <button id="start-button">カメラを起動</button>
+        <p>
+            カメラに映った輪郭を毎フレーム検出し、線として発光表示します。<br>
+            建物や室内など、エッジのはっきりした対象に向けてください。
+        </p>
+    </div>
+
+    <div id="controls" class="hidden">
+        <label for="threshold">感度</label>
+        <input type="range" id="threshold" min="40" max="200" value="100">
+    </div>
+
+    <script>
+    // =====================================================================
+    // 画面空間エフェクトの実装。
+    // 3D復元もトラッキングもせず、毎フレーム画像からエッジを計算して
+    // そのまま重ねる。出どころが画像自体なので、対象とのズレは起きない。
+    // =====================================================================
+    const PROC_WIDTH = 240;   // 画像処理の解像度 (幅)
+
+    const video = document.getElementById('camera-feed');
+    const edgeLayer = document.getElementById('edge-layer');
+    const edgeCtx = edgeLayer.getContext('2d');
+    const thresholdInput = document.getElementById('threshold');
+
+    const procCanvas = document.createElement('canvas');
+    const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
+    const outCanvas = document.createElement('canvas');
+    const outCtx = outCanvas.getContext('2d');
+
+    let gray = null, outImage = null;
+
+    function processFrame() {
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (!vw) return;
+
+        const W = PROC_WIDTH;
+        const H = Math.round(W * vh / vw);
+        if (procCanvas.width !== W || procCanvas.height !== H) {
+            procCanvas.width = W;
+            procCanvas.height = H;
+            outCanvas.width = W;
+            outCanvas.height = H;
+            gray = new Float32Array(W * H);
+            outImage = outCtx.createImageData(W, H);
+        }
+
+        procCtx.drawImage(video, 0, 0, W, H);
+        const src = procCtx.getImageData(0, 0, W, H).data;
+        for (let i = 0; i < W * H; i++) {
+            gray[i] = 0.299 * src[i * 4] + 0.587 * src[i * 4 + 1] + 0.114 * src[i * 4 + 2];
+        }
+
+        // Sobel: しきい値を超えたエッジ強度をシアンのアルファに変換
+        const thr = 240 - Number(thresholdInput.value);  // スライダーは「感度」なので反転
+        const out = outImage.data;
+        out.fill(0);
+        for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+                const i = y * W + x;
+                const gx = (gray[i - W + 1] + 2 * gray[i + 1] + gray[i + W + 1])
+                         - (gray[i - W - 1] + 2 * gray[i - 1] + gray[i + W - 1]);
+                const gy = (gray[i + W - 1] + 2 * gray[i + W] + gray[i + W + 1])
+                         - (gray[i - W - 1] + 2 * gray[i - W] + gray[i - W + 1]);
+                const mag = Math.abs(gx) + Math.abs(gy);
+                if (mag > thr) {
+                    const a = Math.min(255, (mag - thr) * 2);
+                    const o = i * 4;
+                    out[o] = 120;      // R: 少し青緑に寄せる
+                    out[o + 1] = 255;  // G
+                    out[o + 2] = 255;  // B
+                    out[o + 3] = a;
+                }
+            }
+        }
+        outCtx.putImageData(outImage, 0, 0);
+
+        // object-fit: cover と同じ切り出しで画面サイズへ拡大
+        const sw = edgeLayer.width, sh = edgeLayer.height;
+        const scale = Math.max(sw / W, sh / H);
+        const dw = W * scale, dh = H * scale;
+        edgeCtx.clearRect(0, 0, sw, sh);
+        edgeCtx.globalCompositeOperation = 'lighter';
+        edgeCtx.drawImage(outCanvas, (sw - dw) / 2, (sh - dh) / 2, dw, dh);
+    }
+
+    function loop() {
+        processFrame();
+        requestAnimationFrame(loop);
+    }
+
+    function resize() {
+        edgeLayer.width = innerWidth * devicePixelRatio;
+        edgeLayer.height = innerHeight * devicePixelRatio;
+    }
+
+    async function start() {
+        try {
+            video.srcObject = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 1280 } },
+                audio: false,
+            });
+            await video.play();
+        } catch (e) {
+            alert(`カメラを起動できません: ${e.message}`);
+            return;
+        }
+        document.getElementById('start-overlay').classList.add('hidden');
+        document.getElementById('controls').classList.remove('hidden');
+        resize();
+        loop();
+    }
+
+    window.addEventListener('resize', resize);
+    document.getElementById('start-button').addEventListener('click', start);
+    </script>
+</body>
+</html>

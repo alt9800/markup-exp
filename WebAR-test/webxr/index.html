@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebXR immersive-ar</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #10101c;
+            color: white;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        #overlay {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            background: #14141e;
+            padding: 24px;
+            text-align: center;
+        }
+        #overlay.hidden { display: none; }
+
+        #start-button {
+            padding: 18px 48px;
+            font-size: 22px;
+            font-weight: bold;
+            color: #111;
+            background: #e8e8e8;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        #start-button:disabled { background: #555; color: #999; }
+
+        #info {
+            margin-top: 24px;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.65);
+            line-height: 1.7;
+        }
+
+        /* dom-overlay 内の HUD */
+        #hud {
+            position: fixed;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 22px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 22px;
+            font-size: 15px;
+            z-index: 200;
+            text-align: center;
+            max-width: 92%;
+            pointer-events: none;
+        }
+        #hud.hidden { display: none; }
+
+        #reset-button {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 28px;
+            font-size: 15px;
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-radius: 22px;
+            z-index: 200;
+        }
+        #reset-button.hidden { display: none; }
+
+        canvas { position: fixed; top: 0; left: 0; }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <h1 style="margin-bottom: 16px; font-size: 26px;">WebXR immersive-ar</h1>
+        <button id="start-button">AR開始</button>
+        <div id="info">
+            ドアや壁の縦平面を認識して枠を表示し、ボールを出力します。<br>
+            配置後のオブジェクトは空間に固定され、回り込めます。<br>
+            Android Chrome で動作します。
+        </div>
+    </div>
+
+    <div id="hud" class="hidden"><span id="hud-text">…</span></div>
+    <button id="reset-button" class="hidden">リセット</button>
+
+    <script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // ==================== 設定 ====================
+        const CONFIG = {
+            DOOR_WIDTH: 0.9,          // 表示するドア枠の幅 [m]
+            DOOR_HEIGHT: 2.0,         // 高さ [m]
+            FRAME_THICKNESS: 0.06,    // 枠の太さ [m]
+            WALL_OFFSET: 0.02,        // 壁からの浮かせ量 (z-fighting回避) [m]
+            GLOW_DURATION: 3000,      // 枠が光ってからボールが出るまで [ms]
+            MAX_BALLS: 40,
+            SPAWN_INTERVAL: 120,      // ボール生成間隔 [ms]
+            BALL_RADIUS: [0.04, 0.08],
+            GRAVITY: -9.8,
+            RESTITUTION: 0.55,        // 床バウンドの反発係数
+            GROUND_FRICTION: 0.985,   // 接地中の減速 (毎フレーム)
+            BALL_LIFETIME: 20,        // [s]
+            // 「ドアらしい」縦平面と判定する条件
+            DOOR_MIN_HEIGHT: 1.6,
+            DOOR_WIDTH_RANGE: [0.55, 1.4],
+            AUTO_DETECT_STABLE_FRAMES: 20, // 誤検出防止: 連続Nフレーム検出で確定
+        };
+
+        // ==================== 状態 ====================
+        let renderer, scene, camera;
+        let xrSession = null, xrRefSpace = null, hitTestSource = null;
+        let reticle, previewFrame;
+        let doorGroup = null, doorNormalYaw = 0, doorPos = new THREE.Vector3();
+        let doorPlaced = false, ballsActive = false;
+        let balls = [], lastSpawn = 0, placedAt = 0;
+        let planeCandidateFrames = 0, planeCandidate = null;
+        let lastFrameTime = null;
+
+        const overlay = document.getElementById('overlay');
+        const startButton = document.getElementById('start-button');
+        const hud = document.getElementById('hud');
+        const hudText = document.getElementById('hud-text');
+        const resetButton = document.getElementById('reset-button');
+
+        function setHud(text) {
+            hud.classList.remove('hidden');
+            hudText.textContent = text;
+        }
+
+        // ==================== Three.js セットアップ ====================
+        function setupThree() {
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 30);
+
+            scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.0));
+            const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+            dir.position.set(1, 4, 2);
+            scene.add(dir);
+
+            // レティクル (hit-test の結果表示)
+            reticle = new THREE.Mesh(
+                new THREE.RingGeometry(0.06, 0.08, 32),
+                new THREE.MeshBasicMaterial({ color: 0x00ff88, side: THREE.DoubleSide })
+            );
+            reticle.matrixAutoUpdate = false;
+            reticle.visible = false;
+            scene.add(reticle);
+
+            // 配置プレビュー (ワイヤーフレームのドア枠)
+            previewFrame = buildDoorFrame(true);
+            previewFrame.visible = false;
+            scene.add(previewFrame);
+        }
+
+        // ==================== ドア枠の生成 ====================
+        // ローカル座標系: 原点=ドア下端中央, XYが壁面, +Z=壁の法線(部屋側)
+        function buildDoorFrame(isPreview) {
+            const { DOOR_WIDTH: w, DOOR_HEIGHT: h, FRAME_THICKNESS: t } = CONFIG;
+            const group = new THREE.Group();
+
+            const mat = isPreview
+                ? new THREE.MeshBasicMaterial({ color: 0x00ff88, wireframe: true })
+                : new THREE.MeshStandardMaterial({
+                      color: 0x111111, emissive: 0x00ffff,
+                      emissiveIntensity: 1.0, roughness: 0.4
+                  });
+
+            const top = new THREE.Mesh(new THREE.BoxGeometry(w + t * 2, t, t), mat);
+            top.position.set(0, h + t / 2, 0);
+            const left = new THREE.Mesh(new THREE.BoxGeometry(t, h, t), mat);
+            left.position.set(-(w / 2 + t / 2), h / 2, 0);
+            const right = left.clone();
+            right.position.x = w / 2 + t / 2;
+            group.add(top, left, right);
+
+            if (!isPreview) {
+                // 開口部: 暗い半透明の「向こう側」
+                const portalMat = new THREE.MeshBasicMaterial({
+                    color: 0x000022, transparent: true, opacity: 0.0,
+                    side: THREE.DoubleSide
+                });
+                const portal = new THREE.Mesh(new THREE.PlaneGeometry(w, h), portalMat);
+                portal.position.set(0, h / 2, -0.01);
+                portal.name = 'portal';
+                group.add(portal);
+            }
+            return group;
+        }
+
+        // ==================== WebXR セッション ====================
+        async function startAR() {
+            startButton.disabled = true;
+            try {
+                xrSession = await navigator.xr.requestSession('immersive-ar', {
+                    requiredFeatures: ['local-floor', 'hit-test'],
+                    optionalFeatures: ['dom-overlay', 'plane-detection', 'anchors'],
+                    domOverlay: { root: document.body }
+                });
+            } catch (e) {
+                alert(`ARセッションを開始できません: ${e.message}`);
+                startButton.disabled = false;
+                return;
+            }
+
+            xrSession.addEventListener('end', onSessionEnd);
+            xrSession.addEventListener('select', onSelect);
+            await renderer.xr.setSession(xrSession);
+            xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
+
+            // viewer 空間 (画面中央のレイ) から hit-test
+            const viewerSpace = await xrSession.requestReferenceSpace('viewer');
+            hitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+
+            overlay.classList.add('hidden');
+            resetButton.classList.remove('hidden');
+            setHud('ドアや壁の縦平面にカメラを向けてください');
+
+            renderer.setAnimationLoop(onXRFrame);
+        }
+
+        function onSessionEnd() {
+            renderer.setAnimationLoop(null);
+            xrSession = null;
+            hitTestSource = null;
+            resetScene();
+            overlay.classList.remove('hidden');
+            hud.classList.add('hidden');
+            resetButton.classList.add('hidden');
+            startButton.disabled = false;
+        }
+
+        function resetScene() {
+            if (doorGroup) { scene.remove(doorGroup); doorGroup = null; }
+            for (const b of balls) scene.remove(b.mesh);
+            balls = [];
+            doorPlaced = false;
+            ballsActive = false;
+            planeCandidate = null;
+            planeCandidateFrames = 0;
+            if (xrSession) setHud('ドアや壁の縦平面にカメラを向けてください');
+        }
+
+        // ==================== 配置 ====================
+        // 姿勢クォータニオンの +Y 軸 = hit-test / plane の法線
+        const _q = new THREE.Quaternion();
+        const _up = new THREE.Vector3();
+        function normalFromOrientation(orientation) {
+            _q.set(orientation.x, orientation.y, orientation.z, orientation.w);
+            return _up.set(0, 1, 0).applyQuaternion(_q).clone();
+        }
+
+        // 縦平面上の点 + 法線からドアを配置。下端は床 (local-floor の y=0) に落とす
+        function placeDoor(point, normal) {
+            // 法線をカメラ側に向ける
+            const camPos = new THREE.Vector3();
+            camera.getWorldPosition(camPos);
+            const toCam = camPos.clone().sub(point);
+            if (normal.dot(toCam) < 0) normal.negate();
+
+            doorNormalYaw = Math.atan2(normal.x, normal.z);
+            doorPos.set(
+                point.x + normal.x * CONFIG.WALL_OFFSET,
+                0,
+                point.z + normal.z * CONFIG.WALL_OFFSET
+            );
+
+            doorGroup = buildDoorFrame(false);
+            doorGroup.position.copy(doorPos);
+            doorGroup.rotation.y = doorNormalYaw;
+            scene.add(doorGroup);
+
+            doorPlaced = true;
+            placedAt = performance.now();
+            reticle.visible = false;
+            previewFrame.visible = false;
+            setHud('ドアを検出しました');
+        }
+
+        function onSelect() {
+            if (doorPlaced || !reticle.visible || !reticle.userData.isVertical) return;
+            placeDoor(reticle.userData.point.clone(), reticle.userData.normal.clone());
+        }
+
+        // ==================== 平面検出によるドア自動認識 ====================
+        // plane-detection が使える場合: 縦平面のうち「高さ1.6m以上・幅0.55〜1.4m」
+        // というドアらしい寸法のものを探す
+        const _v = new THREE.Vector3();
+        function detectDoorPlane(frame) {
+            if (!frame.detectedPlanes) return null;
+
+            for (const plane of frame.detectedPlanes) {
+                if (plane.orientation !== 'vertical') continue;
+                const pose = frame.getPose(plane.planeSpace, xrRefSpace);
+                if (!pose) continue;
+
+                const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
+                let minY = Infinity, maxY = -Infinity;
+                let minH = Infinity, maxH = -Infinity;
+                const normal = normalFromOrientation(pose.transform.orientation);
+                // 壁面内の水平方向 = 法線と鉛直軸の外積
+                const horiz = new THREE.Vector3(0, 1, 0).cross(normal).normalize();
+                const center = new THREE.Vector3();
+
+                for (const p of plane.polygon) {
+                    _v.set(p.x, p.y, p.z).applyMatrix4(m);
+                    minY = Math.min(minY, _v.y);
+                    maxY = Math.max(maxY, _v.y);
+                    const h = _v.dot(horiz);
+                    minH = Math.min(minH, h);
+                    maxH = Math.max(maxH, h);
+                    center.add(_v);
+                }
+                center.divideScalar(plane.polygon.length);
+
+                const height = maxY - minY;
+                const width = maxH - minH;
+                if (height >= CONFIG.DOOR_MIN_HEIGHT &&
+                    width >= CONFIG.DOOR_WIDTH_RANGE[0] &&
+                    width <= CONFIG.DOOR_WIDTH_RANGE[1]) {
+                    return { point: center, normal: normal.clone(), plane };
+                }
+            }
+            return null;
+        }
+
+        // ==================== ボール物理 ====================
+        const ballGeo = new THREE.SphereGeometry(1, 20, 14);
+        const ballColors = [0xff5c5c, 0xffc14d, 0x5cd67a, 0x5ca8ff, 0xc45cff, 0xff8ee0];
+
+        function spawnBall() {
+            const r = CONFIG.BALL_RADIUS[0] +
+                Math.random() * (CONFIG.BALL_RADIUS[1] - CONFIG.BALL_RADIUS[0]);
+            const mat = new THREE.MeshStandardMaterial({
+                color: ballColors[(Math.random() * ballColors.length) | 0],
+                roughness: 0.35, metalness: 0.1
+            });
+            const mesh = new THREE.Mesh(ballGeo, mat);
+            mesh.scale.setScalar(r);
+
+            // ドア開口部の内側 (壁の向こう) からランダムに出てくる
+            const local = new THREE.Vector3(
+                (Math.random() - 0.5) * CONFIG.DOOR_WIDTH * 0.8,
+                r + Math.random() * (CONFIG.DOOR_HEIGHT * 0.5),
+                -0.15
+            );
+            mesh.position.copy(doorGroup.localToWorld(local));
+
+            // 初速: ドア法線方向に飛び出す + 横方向の散らばり
+            const n = new THREE.Vector3(Math.sin(doorNormalYaw), 0, Math.cos(doorNormalYaw));
+            const side = new THREE.Vector3(n.z, 0, -n.x);
+            const v = n.multiplyScalar(0.8 + Math.random() * 1.6)
+                .addScaledVector(side, (Math.random() - 0.5) * 0.8);
+            v.y = Math.random() * 0.4;
+
+            scene.add(mesh);
+            balls.push({ mesh, v, r, age: 0 });
+        }
+
+        function updateBalls(dt) {
+            for (let i = balls.length - 1; i >= 0; i--) {
+                const b = balls[i];
+                b.age += dt;
+                b.v.y += CONFIG.GRAVITY * dt;
+                b.mesh.position.addScaledVector(b.v, dt);
+
+                // 床 (local-floor の y=0) とのバウンド
+                if (b.mesh.position.y < b.r) {
+                    b.mesh.position.y = b.r;
+                    if (b.v.y < 0) b.v.y = -b.v.y * CONFIG.RESTITUTION;
+                    if (Math.abs(b.v.y) < 0.15) b.v.y = 0; // 微小バウンド打ち切り
+                    b.v.x *= CONFIG.GROUND_FRICTION;
+                    b.v.z *= CONFIG.GROUND_FRICTION;
+                }
+
+                // 転がり表現: 速度に応じて回転
+                const speed = Math.hypot(b.v.x, b.v.z);
+                if (speed > 0.01) {
+                    const axis = new THREE.Vector3(b.v.z, 0, -b.v.x).normalize();
+                    b.mesh.rotateOnWorldAxis(axis, (speed / b.r) * dt);
+                }
+
+                // 寿命 or ドアから8m以上でリサイクル
+                if (b.age > CONFIG.BALL_LIFETIME ||
+                    b.mesh.position.distanceTo(doorPos) > 8) {
+                    scene.remove(b.mesh);
+                    balls.splice(i, 1);
+                }
+            }
+        }
+
+        // ==================== フレームループ ====================
+        function onXRFrame(time, frame) {
+            const dt = lastFrameTime === null ? 0 : Math.min((time - lastFrameTime) / 1000, 0.05);
+            lastFrameTime = time;
+            if (!frame) return;
+
+            if (!doorPlaced) {
+                // 1) plane-detection でドアらしい縦平面を探す (連続検出で確定)
+                const candidate = detectDoorPlane(frame);
+                if (candidate) {
+                    if (planeCandidate === candidate.plane) {
+                        planeCandidateFrames++;
+                    } else {
+                        planeCandidate = candidate.plane;
+                        planeCandidateFrames = 1;
+                    }
+                    if (planeCandidateFrames >= CONFIG.AUTO_DETECT_STABLE_FRAMES) {
+                        placeDoor(candidate.point, candidate.normal);
+                    } else {
+                        setHud('ドアらしき平面を検出中');
+                    }
+                }
+
+                // 2) フォールバック: hit-test + タップ配置
+                if (!doorPlaced && hitTestSource) {
+                    const hits = frame.getHitTestResults(hitTestSource);
+                    if (hits.length > 0) {
+                        const pose = hits[0].getPose(xrRefSpace);
+                        if (pose) {
+                            reticle.visible = true;
+                            reticle.matrix.fromArray(pose.transform.matrix);
+
+                            const normal = normalFromOrientation(pose.transform.orientation);
+                            const isVertical = Math.abs(normal.y) < 0.4;
+                            const point = new THREE.Vector3(
+                                pose.transform.position.x,
+                                pose.transform.position.y,
+                                pose.transform.position.z
+                            );
+                            reticle.userData = { isVertical, point, normal };
+                            reticle.material.color.setHex(isVertical ? 0x00ff88 : 0xff8800);
+
+                            if (isVertical && !candidate) {
+                                // プレビュー表示
+                                const camPos = new THREE.Vector3();
+                                camera.getWorldPosition(camPos);
+                                const n = normal.clone();
+                                if (n.dot(camPos.clone().sub(point)) < 0) n.negate();
+                                previewFrame.visible = true;
+                                previewFrame.position.set(point.x, 0, point.z);
+                                previewFrame.rotation.y = Math.atan2(n.x, n.z);
+                                setHud('縦平面を検出 — タップでドアを配置');
+                            } else if (!candidate) {
+                                previewFrame.visible = false;
+                                setHud('壁やドアなど縦の面を狙ってください');
+                            }
+                        }
+                    } else {
+                        reticle.visible = false;
+                        previewFrame.visible = false;
+                    }
+                }
+            } else {
+                // 配置済み: グロー演出 → ボール放出
+                const elapsed = performance.now() - placedAt;
+                const portal = doorGroup.getObjectByName('portal');
+
+                // 枠の脈動
+                const pulse = Math.sin(time * 0.004) * 0.5 + 1.0;
+                doorGroup.traverse(o => {
+                    if (o.material && o.material.emissive) {
+                        o.material.emissiveIntensity = pulse;
+                    }
+                });
+
+                if (!ballsActive && elapsed > CONFIG.GLOW_DURATION) {
+                    ballsActive = true;
+                    setHud('ボールが溢れています');
+                }
+                // 開口部がじわっと暗くなる (異空間感)
+                if (portal) {
+                    portal.material.opacity = Math.min(elapsed / CONFIG.GLOW_DURATION, 1) * 0.55;
+                }
+
+                if (ballsActive) {
+                    if (balls.length < CONFIG.MAX_BALLS &&
+                        performance.now() - lastSpawn > CONFIG.SPAWN_INTERVAL) {
+                        lastSpawn = performance.now();
+                        spawnBall();
+                    }
+                    updateBalls(dt);
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // ==================== 初期化 ====================
+        async function init() {
+            if (!navigator.xr || !(await navigator.xr.isSessionSupported?.('immersive-ar'))) {
+                startButton.disabled = true;
+                document.getElementById('info').textContent =
+                    'この端末のブラウザではWebXR ARを利用できません。Android Chromeで開いてください。';
+                return;
+            }
+            setupThree();
+            startButton.addEventListener('click', startAR);
+            resetButton.addEventListener('click', resetScene);
+            addEventListener('resize', () => {
+                renderer?.setSize(innerWidth, innerHeight);
+            });
+        }
+        init();
+    </script>
+</body>
+</html>

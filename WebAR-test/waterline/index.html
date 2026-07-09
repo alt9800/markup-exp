@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>水辺のライン認識</title>
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #000;
+                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+        #camera-feed {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+        }
+
+        #particle-layer {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        #start-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: #14141e;
+            color: #fff;
+            text-align: center;
+            padding: 24px;
+        }
+        #start-overlay.hidden { display: none; }
+        #start-button {
+            padding: 18px 48px;
+            font-size: 22px;
+            font-weight: bold;
+            color: #111;
+            background: #e8e8e8;
+            border: none;
+            border-radius: 8px;
+        }
+        #start-overlay p {
+            margin-top: 20px;
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+            line-height: 1.8;
+        }
+
+        #hud {
+            position: fixed;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 5;
+            background: rgba(0,0,0,0.65);
+            color: #fff;
+            font-size: 14px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            max-width: 92%;
+            text-align: center;
+            pointer-events: none;
+        }
+        #hud.hidden { display: none; }
+
+        #auto-button {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 5;
+            padding: 10px 26px;
+            font-size: 15px;
+            color: #fff;
+            background: rgba(0,0,0,0.55);
+            border: 1px solid rgba(255,255,255,0.4);
+            border-radius: 8px;
+        }
+        #auto-button.hidden { display: none; }
+    </style>
+</head>
+<body>
+    <video id="camera-feed" autoplay muted playsinline></video>
+    <canvas id="particle-layer"></canvas>
+
+    <div id="start-overlay">
+        <h1 style="font-size:26px; margin-bottom:16px;">水辺のライン認識</h1>
+        <button id="start-button">カメラを起動</button>
+        <p>
+            水面と対岸・岸辺の境界ラインを認識し、そこから光の粒を立ち上らせます。<br>
+            水平に近い境界が画面の中ほどに入るように構えてください。<br>
+            うまく認識できないときは、画面の境界あたりをタップしてください。
+        </p>
+    </div>
+
+    <div id="hud" class="hidden"><span id="hud-text"></span></div>
+    <button id="auto-button" class="hidden">自動認識に戻す</button>
+
+    <script>
+    // =====================================================================
+    // 境界ラインは毎フレーム画像から取り直す(画面空間)ので、対象からズレない。
+    // 粒子は寿命を持って画面上を上昇する。線の多少の揺れは演出として吸収される。
+    // =====================================================================
+    const CONFIG = {
+        PROC_WIDTH: 160,        // 画像処理の解像度 (幅)
+        DETECT_FPS: 10,
+        BAND: [0.30, 0.95],     // 境界を探す縦範囲 (画面比)
+        MIN_STRENGTH: 60,       // 横エッジの最低強度 (弱い列は近傍から補間)
+        MIN_VALID_RATIO: 0.3,   // 有効列がこれ未満ならライン不成立
+        EMA: 0.35,              // ラインの時間平滑
+        SPAWN_PER_FRAME: 3,     // 粒子の生成数/フレーム
+        MAX_PARTICLES: 260,
+        RISE_SPEED: [24, 80],   // 上昇速度 [px/s]
+        LIFE: [1.2, 2.8],       // 寿命 [s]
+    };
+
+    const video = document.getElementById('camera-feed');
+    const layer = document.getElementById('particle-layer');
+    const ctx = layer.getContext('2d');
+    const hud = document.getElementById('hud');
+    const hudText = document.getElementById('hud-text');
+    const autoButton = document.getElementById('auto-button');
+
+    const procCanvas = document.createElement('canvas');
+    const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
+
+    let line = null;          // 画面座標の折れ線 [{x, y}, ...] (null = 未検出)
+    let manualY = null;       // タップ指定時の水平ライン (画面座標)
+    let particles = [];
+    let lastTime = null;
+
+    function setHud(t) { hud.classList.remove('hidden'); hudText.textContent = t; }
+
+    // ---------------------------------------------------------------
+    // 境界検出: 列ごとに「帯域内で最も強い横エッジの行」を取り、
+    // 弱い列は近傍から補間、メディアンで平滑、時間方向はEMA。
+    // ---------------------------------------------------------------
+    function detectLine() {
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (!vw) return null;
+        const W = CONFIG.PROC_WIDTH;
+        const H = Math.round(W * vh / vw);
+        procCanvas.width = W;
+        procCanvas.height = H;
+        procCtx.drawImage(video, 0, 0, W, H);
+        const src = procCtx.getImageData(0, 0, W, H).data;
+
+        const gray = new Float32Array(W * H);
+        for (let i = 0; i < W * H; i++) {
+            gray[i] = 0.299 * src[i * 4] + 0.587 * src[i * 4 + 1] + 0.114 * src[i * 4 + 2];
+        }
+
+        const y0 = Math.max(1, Math.floor(H * CONFIG.BAND[0]));
+        const y1 = Math.min(H - 2, Math.floor(H * CONFIG.BAND[1]));
+        const rows = new Float32Array(W).fill(-1);
+        let valid = 0;
+
+        for (let x = 1; x < W - 1; x++) {
+            let bestY = -1, bestS = 0;
+            for (let y = y0; y <= y1; y++) {
+                const i = y * W + x;
+                const gy = Math.abs(
+                    (gray[i + W - 1] + 2 * gray[i + W] + gray[i + W + 1])
+                  - (gray[i - W - 1] + 2 * gray[i - W] + gray[i - W + 1]));
+                if (gy > bestS) { bestS = gy; bestY = y; }
+            }
+            if (bestS >= CONFIG.MIN_STRENGTH) { rows[x] = bestY; valid++; }
+        }
+        if (valid < W * CONFIG.MIN_VALID_RATIO) return null;
+
+        // 無効列を近傍の有効値で補間
+        let prev = -1;
+        for (let x = 0; x < W; x++) {
+            if (rows[x] >= 0) { prev = rows[x]; }
+            else if (prev >= 0) { rows[x] = prev; }
+        }
+        for (let x = W - 1, next = -1; x >= 0; x--) {
+            if (rows[x] >= 0) { next = rows[x]; }
+            else if (next >= 0) { rows[x] = next; }
+        }
+
+        // メディアンフィルタ (幅5)
+        const smoothed = new Float32Array(W);
+        for (let x = 0; x < W; x++) {
+            const win = [];
+            for (let k = -2; k <= 2; k++) {
+                const xx = Math.min(W - 1, Math.max(0, x + k));
+                win.push(rows[xx]);
+            }
+            win.sort((a, b) => a - b);
+            smoothed[x] = win[2];
+        }
+
+        // ビデオ座標 → 画面座標 (object-fit: cover と同じ変換)
+        const sw = innerWidth, sh = innerHeight;
+        const scale = Math.max(sw / vw, sh / vh);
+        const ox = (sw - vw * scale) / 2;
+        const oy = (sh - vh * scale) / 2;
+        const s = vw / W;
+        const pts = [];
+        for (let x = 0; x < W; x += 2) {
+            pts.push({ x: x * s * scale + ox, y: smoothed[x] * s * scale + oy });
+        }
+        return pts;
+    }
+
+    function detectLoop() {
+        if (manualY === null) {
+            const detected = detectLine();
+            if (detected) {
+                if (line && line.length === detected.length) {
+                    // 時間方向の平滑
+                    for (let i = 0; i < line.length; i++) {
+                        line[i].y += (detected[i].y - line[i].y) * CONFIG.EMA;
+                        line[i].x = detected[i].x;
+                    }
+                } else {
+                    line = detected;
+                }
+                setHud('境界ラインを認識中');
+            } else {
+                line = null;
+                setHud('境界が見つかりません。画面をタップして指定できます');
+            }
+        }
+        setTimeout(detectLoop, 1000 / CONFIG.DETECT_FPS);
+    }
+
+    // ---------------------------------------------------------------
+    // 粒子
+    // ---------------------------------------------------------------
+    function lineYAt(x) {
+        if (manualY !== null) return manualY;
+        if (!line || line.length === 0) return null;
+        // 折れ線上の最近傍セグメントで線形補間
+        if (x <= line[0].x) return line[0].y;
+        for (let i = 1; i < line.length; i++) {
+            if (x <= line[i].x) {
+                const t = (x - line[i - 1].x) / (line[i].x - line[i - 1].x || 1);
+                return line[i - 1].y + (line[i].y - line[i - 1].y) * t;
+            }
+        }
+        return line[line.length - 1].y;
+    }
+
+    function spawnParticles() {
+        if (manualY === null && !line) return;
+        for (let n = 0; n < CONFIG.SPAWN_PER_FRAME; n++) {
+            if (particles.length >= CONFIG.MAX_PARTICLES) break;
+            const x = Math.random() * innerWidth;
+            const y = lineYAt(x);
+            if (y === null) continue;
+            particles.push({
+                x, y,
+                vy: -(CONFIG.RISE_SPEED[0] + Math.random() * (CONFIG.RISE_SPEED[1] - CONFIG.RISE_SPEED[0])),
+                sway: (Math.random() - 0.5) * 24,     // 横揺れ幅 [px]
+                phase: Math.random() * Math.PI * 2,
+                life: CONFIG.LIFE[0] + Math.random() * (CONFIG.LIFE[1] - CONFIG.LIFE[0]),
+                age: 0,
+                size: 1.5 + Math.random() * 2.5,
+            });
+        }
+    }
+
+    function render(time) {
+        const dt = lastTime === null ? 0 : Math.min((time - lastTime) / 1000, 0.05);
+        lastTime = time;
+
+        const dpr = devicePixelRatio;
+        ctx.clearRect(0, 0, layer.width, layer.height);
+        ctx.save();
+        ctx.scale(dpr, dpr);
+        ctx.globalCompositeOperation = 'lighter';
+
+        // ライン自体もうっすら描く (認識結果のフィードバック)
+        const pts = manualY !== null
+            ? [{ x: 0, y: manualY }, { x: innerWidth, y: manualY }]
+            : line;
+        if (pts) {
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+            for (const p of pts) ctx.lineTo(p.x, p.y);
+            ctx.strokeStyle = 'rgba(140, 235, 255, 0.35)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+
+        spawnParticles();
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.age += dt;
+            if (p.age > p.life) { particles.splice(i, 1); continue; }
+            p.y += p.vy * dt;
+            const sway = Math.sin(p.age * 3 + p.phase) * p.sway * dt;
+            p.x += sway;
+
+            const t = p.age / p.life;
+            const alpha = t < 0.2 ? t / 0.2 : 1 - (t - 0.2) / 0.8;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * (1 - t * 0.4), 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(180, 240, 255, ${alpha * 0.8})`;
+            ctx.fill();
+        }
+
+        ctx.restore();
+        requestAnimationFrame(render);
+    }
+
+    // ---------------------------------------------------------------
+    // 入出力
+    // ---------------------------------------------------------------
+    function onTap(ev) {
+        if (!video.srcObject) return;
+        manualY = ev.clientY;
+        autoButton.classList.remove('hidden');
+        setHud('タップ位置にラインを固定しました');
+    }
+
+    function resize() {
+        layer.width = innerWidth * devicePixelRatio;
+        layer.height = innerHeight * devicePixelRatio;
+    }
+
+    async function start() {
+        try {
+            video.srcObject = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 1280 } },
+                audio: false,
+            });
+            await video.play();
+        } catch (e) {
+            alert(`カメラを起動できません: ${e.message}`);
+            return;
+        }
+        document.getElementById('start-overlay').classList.add('hidden');
+        window.addEventListener('click', onTap);
+        resize();
+        detectLoop();
+        requestAnimationFrame(render);
+    }
+
+    window.addEventListener('resize', resize);
+    document.getElementById('start-button').addEventListener('click', start);
+    autoButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        manualY = null;
+        autoButton.classList.add('hidden');
+    });
+    </script>
+</body>
+</html>
