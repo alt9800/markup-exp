@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ぷるぷるぷらとぅ</title>
+<style>
+  :root {
+    --soda-deep: #0b5560;
+    --soda-mid: #0e7c86;
+    --soda-light: #bff3f0;
+    --lemon: #f9e08c;
+    --panel-bg: rgba(255, 255, 255, 0.84);
+    --focus-ring: #0b5560;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    background: linear-gradient(170deg, #eafcff 0%, #d7f8f2 45%, #d0f3e4 100%);
+    color: var(--soda-deep);
+  }
+  #scene { position: fixed; inset: 0; display: block; touch-action: none; }
+
+  .bubble {
+    position: fixed; border-radius: 50%;
+    background: radial-gradient(circle at 32% 30%, rgba(255,255,255,.9), rgba(190,240,245,.28) 60%, rgba(160,225,235,.12));
+    pointer-events: none;
+    animation: rise linear infinite;
+    z-index: 1;
+  }
+  @keyframes rise {
+    from { transform: translateY(105vh) scale(.9); opacity: .9; }
+    to   { transform: translateY(-12vh) scale(1.08); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { .bubble { display: none; } }
+
+  header {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    background: var(--panel-bg);
+    backdrop-filter: blur(10px);
+    border: 1.5px solid rgba(14,124,134,.25);
+    border-radius: 16px;
+    padding: 10px 16px;
+    box-shadow: 0 6px 24px rgba(11,85,96,.14);
+  }
+  h1 { margin: 0; font-size: 1.15rem; letter-spacing: .04em; }
+  h1 .puru { display: inline-block; }
+  @media (prefers-reduced-motion: no-preference) {
+    h1 .puru { animation: puruputitle 2.6s ease-in-out infinite; }
+    @keyframes puruputitle {
+      0%, 100% { transform: scale(1,1); }
+      12% { transform: scale(1.06,.94); }
+      24% { transform: scale(.96,1.05); }
+      36% { transform: scale(1.02,.98); }
+      48% { transform: scale(1,1); }
+    }
+  }
+  header p { margin: 4px 0 0; font-size: .72rem; }
+  .badge {
+    display: inline-block; font-size: .66rem; font-weight: 700;
+    border: 1px solid var(--soda-mid); border-radius: 999px;
+    padding: 0 8px; margin-right: 4px; background: var(--soda-light);
+  }
+
+  #panel {
+    position: fixed; right: 12px; top: 12px; z-index: 10;
+    background: var(--panel-bg);
+    backdrop-filter: blur(10px);
+    border: 1.5px solid rgba(14,124,134,.25);
+    border-radius: 16px;
+    padding: 12px 14px;
+    width: 252px;
+    box-shadow: 0 6px 24px rgba(11,85,96,.14);
+  }
+  #panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  #panel h2 { margin: 0; font-size: .85rem; }
+  #fold { font-size: .68rem; padding: 3px 10px; margin: 0; }
+  #panel.folded #panel-body { display: none; }
+  #panel.folded #panel-head { margin-bottom: 0; }
+  fieldset {
+    border: 1px solid rgba(14,124,134,.3); border-radius: 10px;
+    margin: 0 0 8px; padding: 7px 10px 8px;
+  }
+  fieldset:last-child { margin-bottom: 0; }
+  legend { font-size: .72rem; font-weight: 700; padding: 0 5px; }
+  label { display: block; font-size: .74rem; margin-bottom: 1px; font-weight: 600; }
+  input[type="range"] { width: 100%; accent-color: var(--soda-mid); margin: 0 0 4px; }
+
+  button, .filebtn {
+    font: inherit; font-size: .78rem; font-weight: 700;
+    color: var(--soda-deep);
+    background: linear-gradient(180deg, #ffffff, var(--soda-light));
+    border: 1.5px solid var(--soda-mid);
+    border-radius: 999px;
+    padding: 6px 13px;
+    cursor: pointer;
+    margin: 2px 3px 2px 0;
+    transition: transform .12s ease;
+    display: inline-block;
+  }
+  button:hover, .filebtn:hover { background: linear-gradient(180deg, #ffffff, var(--lemon)); }
+  @media (prefers-reduced-motion: no-preference) {
+    button:active { transform: scale(.93, 1.05); }
+  }
+  button:focus-visible, .filebtn:focus-within, input:focus-visible {
+    outline: 3px solid var(--focus-ring); outline-offset: 2px;
+  }
+  #file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+  #status {
+    position: fixed; left: 12px; bottom: 12px; z-index: 10;
+    background: var(--panel-bg);
+    border: 1.5px solid rgba(14,124,134,.25);
+    border-radius: 10px;
+    padding: 6px 12px; font-size: .76rem;
+    max-width: min(460px, calc(100vw - 24px));
+  }
+
+  /* レスポンシブ: 縦持ちスマホではパネルを下部に */
+  @media (max-width: 720px) {
+    header { max-width: calc(100vw - 24px); }
+    header p { display: none; }
+    #panel {
+      top: auto; bottom: 12px; left: 12px; right: 12px; width: auto;
+      max-height: 42vh; overflow-y: auto;
+    }
+    #panel-body { display: flex; flex-wrap: wrap; gap: 6px; }
+    fieldset { flex: 1 1 45%; margin: 0; }
+    #status { bottom: auto; top: 64px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene" aria-label="3D都市ビュー: 建物をドラッグ、地面をクリックで揺らせます" role="img"></canvas>
+
+<header>
+  <h1><span class="puru">ぷるぷる</span>ぷらとぅ</h1>
+  <p><span id="mode" class="badge">判定中</span> 建物をドラッグ / 地面をクリック / Q=地震 R=静止</p>
+</header>
+
+<div id="panel">
+  <div id="panel-head">
+    <h2 id="ctl-heading">コントロール</h2>
+    <button type="button" id="fold" aria-expanded="true" aria-controls="panel-body">最小化</button>
+  </div>
+  <div id="panel-body">
+  <fieldset aria-labelledby="ctl-heading">
+    <legend>ゆらす</legend>
+    <button type="button" id="quake">地震</button>
+    <button type="button" id="poke">つつく</button>
+    <button type="button" id="reset">静止</button>
+  </fieldset>
+  <fieldset>
+    <legend>ゼリーの質感</legend>
+    <label for="soft">やわらかさ</label>
+    <input type="range" id="soft" min="1" max="100" value="55" aria-describedby="soft-desc">
+    <span id="soft-desc" hidden>大きいほど建物がやわらかく大きく揺れます</span>
+    <label for="wobble">ぷるぷる持続</label>
+    <input type="range" id="wobble" min="1" max="100" value="60" aria-describedby="wobble-desc">
+    <span id="wobble-desc" hidden>大きいほど揺れが長く続きます</span>
+  </fieldset>
+  <fieldset>
+    <legend>都市モデル</legend>
+    <label class="filebtn" for="file">CityGML読込<input type="file" id="file" accept=".gml,.xml"></label>
+    <button type="button" id="demo">デモ都市</button>
+  </fieldset>
+  <fieldset>
+    <legend>モーション</legend>
+    <button type="button" id="shake" hidden>振って揺らす</button>
+    <button type="button" id="motion" aria-pressed="false">一時停止</button>
+  </fieldset>
+  </div>
+</div>
+
+<div id="status" role="status" aria-live="polite">デモ都市を表示中</div>
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const statusEl = document.getElementById('status');
+const say = (msg) => { statusEl.textContent = msg; };
+
+/* ---------- シーン ---------- */
+const canvas = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setClearColor(0x000000, 0);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xd9f7f0, 900, 2600);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 1, 6000);
+camera.position.set(260, 240, 340);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 30, 0);
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.enableDamping = !reduceMotion;
+
+scene.add(new THREE.HemisphereLight(0xf3ffff, 0x9fd8cc, 1.15));
+const sun = new THREE.DirectionalLight(0xfff6d8, 1.6);
+sun.position.set(300, 500, 200);
+scene.add(sun);
+
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(2400, 64),
+  new THREE.MeshPhongMaterial({ color: 0xcdeee0, shininess: 60 })
+);
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+
+/* ---------- WebGPU ゼリー地盤 (対応環境のみ) ----------
+   地面を 96×96 の波動方程式フィールドとしてコンピュートシェーダーで解き、
+   衝撃が波として伝わる。建物は波に乗って上下し、勾配で揺すられる。
+   非対応環境では従来どおり静的な地面のまま。 */
+const modeBadge = document.getElementById('mode');
+let wave = null;
+let worldExt = 340; // フィールド半径 (ワールドm)
+function setWorldExt(e) {
+  worldExt = Math.max(340, e);
+  if (wave) wave.mesh.scale.set(worldExt / 340, 1, worldExt / 340);
+}
+(async () => {
+  try {
+    if (!navigator.gpu) throw new Error('no webgpu');
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) throw new Error('no adapter');
+    const device = await adapter.requestDevice();
+    const N = 96, CELLS = N * N, SIZE = CELLS * 4, MAXI = 16;
+    const WGSL = `
+struct Params { c2: f32, damp: f32, n: u32, nImp: u32 }
+@group(0) @binding(0) var<storage, read> prev: array<f32>;
+@group(0) @binding(1) var<storage, read> cur: array<f32>;
+@group(0) @binding(2) var<storage, read_write> nxt: array<f32>;
+@group(0) @binding(3) var<uniform> P: Params;
+@group(0) @binding(4) var<storage, read> imp: array<vec4f>;
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) g: vec3u) {
+  let n = P.n;
+  if (g.x >= n || g.y >= n) { return; }
+  let i = g.y * n + g.x;
+  let xl = cur[i - select(0u, 1u, g.x > 0u)];
+  let xr = cur[i + select(0u, 1u, g.x < n - 1u)];
+  let yd = cur[i - select(0u, n, g.y > 0u)];
+  let yu = cur[i + select(0u, n, g.y < n - 1u)];
+  let lap = xl + xr + yd + yu - 4.0 * cur[i];
+  var v = (2.0 * cur[i] - prev[i] + P.c2 * lap) * P.damp;
+  for (var k = 0u; k < P.nImp; k = k + 1u) {
+    let m = imp[k];
+    let dx = f32(g.x) - m.x; let dy = f32(g.y) - m.y;
+    v = v + m.z * exp(-(dx * dx + dy * dy) / (m.w * m.w));
+  }
+  nxt[i] = clamp(v, -6.0, 6.0);
+}`;
+    const bufs = [0, 1, 2].map(() => device.createBuffer({
+      size: SIZE, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }));
+    const staging = device.createBuffer({ size: SIZE, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const impBuf = device.createBuffer({ size: MAXI * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    const parBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const pipeline = device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: device.createShaderModule({ code: WGSL }), entryPoint: 'main' } });
+    // prev/cur/nxt を3バッファで巡回
+    const groups = [[0, 1, 2], [1, 2, 0], [2, 0, 1]].map(([p, c, x]) => device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: bufs[p] } },
+        { binding: 1, resource: { buffer: bufs[c] } },
+        { binding: 2, resource: { buffer: bufs[x] } },
+        { binding: 3, resource: { buffer: parBuf } },
+        { binding: 4, resource: { buffer: impBuf } },
+      ] }));
+
+    const geo = new THREE.PlaneGeometry(680, 680, N - 1, N - 1);
+    geo.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({
+      color: 0xbfe9dd, shininess: 90, specular: 0x99ffee, transparent: true, opacity: 0.96 }));
+    mesh.position.y = 0.05;
+    mesh.frustumCulled = false;
+    mesh.scale.set(worldExt / 340, 1, worldExt / 340);
+    scene.add(mesh);
+    // 頂点→セル対応表
+    const pos = geo.attributes.position;
+    const vmap = new Uint32Array(pos.count);
+    for (let i = 0; i < pos.count; i++) {
+      const gx = THREE.MathUtils.clamp(Math.round((pos.getX(i) / 340 + 1) / 2 * (N - 1)), 0, N - 1);
+      const gz = THREE.MathUtils.clamp(Math.round((pos.getZ(i) / 340 + 1) / 2 * (N - 1)), 0, N - 1);
+      vmap[i] = gz * N + gx;
+    }
+
+    const field = new Float32Array(CELLS);
+    const impQueue = [];
+    const impData = new Float32Array(MAXI * 4);
+    const parAB = new ArrayBuffer(16);
+    const parF = new Float32Array(parAB), parU = new Uint32Array(parAB);
+    parF[0] = 0.3; parF[1] = 0.994; parU[2] = N;
+    let rot = 0, mapping = false;
+
+    wave = {
+      mesh, field,
+      addImpulse(x, z, amp, r = 3.5) {
+        const gx = (x / worldExt + 1) / 2 * (N - 1);
+        const gz = (z / worldExt + 1) / 2 * (N - 1);
+        if (gx < 0 || gx > N - 1 || gz < 0 || gz > N - 1) return;
+        if (impQueue.length < MAXI) impQueue.push([gx, gz, amp, r]);
+      },
+      heightAt(x, z) {
+        const gx = Math.round((x / worldExt + 1) / 2 * (N - 1));
+        const gz = Math.round((z / worldExt + 1) / 2 * (N - 1));
+        if (gx < 1 || gx > N - 2 || gz < 1 || gz > N - 2) return 0;
+        return field[gz * N + gx];
+      },
+      gradAt(x, z, out) {
+        const gx = Math.round((x / worldExt + 1) / 2 * (N - 1));
+        const gz = Math.round((z / worldExt + 1) / 2 * (N - 1));
+        if (gx < 1 || gx > N - 2 || gz < 1 || gz > N - 2) { out.set(0, 0); return; }
+        out.set(field[gz * N + gx + 1] - field[gz * N + gx - 1],
+                field[(gz + 1) * N + gx] - field[(gz - 1) * N + gx]);
+      },
+      step() {
+        const nI = impQueue.length;
+        if (nI) {
+          impData.fill(0);
+          for (let k = 0; k < nI; k++) impData.set(impQueue[k], k * 4);
+          impQueue.length = 0;
+          device.queue.writeBuffer(impBuf, 0, impData, 0, nI * 4);
+        }
+        parU[3] = nI;
+        device.queue.writeBuffer(parBuf, 0, parAB);
+        const enc = device.createCommandEncoder();
+        const pass = enc.beginComputePass();
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, groups[rot]);
+        pass.dispatchWorkgroups(Math.ceil(N / 8), Math.ceil(N / 8));
+        pass.end();
+        const nxtIdx = [2, 0, 1][rot];
+        const doRead = !mapping;
+        if (doRead) enc.copyBufferToBuffer(bufs[nxtIdx], 0, staging, 0, SIZE);
+        device.queue.submit([enc.finish()]);
+        if (doRead) {
+          mapping = true;
+          staging.mapAsync(GPUMapMode.READ).then(() => {
+            field.set(new Float32Array(staging.getMappedRange()));
+            staging.unmap();
+            mapping = false;
+            const pa = geo.attributes.position;
+            for (let i = 0; i < pa.count; i++) pa.setY(i, field[vmap[i]] * 1.5);
+            pa.needsUpdate = true;
+            geo.computeVertexNormals();
+          }).catch(() => { mapping = false; });
+        }
+        rot = (rot + 1) % 3;
+      }
+    };
+    modeBadge.textContent = 'WebGPU地盤';
+  } catch (e) {
+    modeBadge.textContent = '標準';
+  }
+})();
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+/* ---------- ゼリー変形シェーダー ----------
+   変形は GPU の頂点シェーダーで行う。CPU 側は建物あたり
+   頂部変位 u (2自由度) のバネ物理だけを解き、uniform で渡す。
+   ・曲げモード形状 s(t)=t^2(3-2t) で根元固定のカンチレバー曲げ
+   ・リーン量に応じて頂点が弧を描いて沈み込む(倒れ込み表現)
+   ・体積保存風の縦スクワッシュ */
+/* 共通: たわみ曲線と断面回転フレーム。
+   片持ち梁のたわみ s(t)=(3t²-t³)/2 は先端で傾きが残るので、
+   断面を接線方向に回すと上面が引き込み側を向く。 */
+const JELLY_FRAME = /* glsl */`
+  float t = clamp(position.y / uH, 0.0, 1.0);
+  float s = 0.5 * (3.0 * t * t - t * t * t);
+  float pl = length(uPull);
+  vec2 dir = pl > 1e-5 ? uPull / pl : vec2(1.0, 0.0);
+  float slope = pl * 0.5 * (6.0 * t - 3.0 * t * t) / uH; // 接線の水平/垂直比
+  float inv = inversesqrt(1.0 + slope * slope);
+  float c0 = inv, s0 = slope * inv;
+  vec3 e1v = vec3(dir.x * c0, -s0, dir.y * c0); // 断面内・引き込み方向
+  vec3 e2v = vec3(-dir.y, 0.0, dir.x);          // 断面内・横方向
+  vec3 Tv  = vec3(dir.x * s0,  c0, dir.y * s0); // 中心線の接線 (旧・天頂)
+`;
+const JELLY_VERTEX = /* glsl */`
+  float leanFrac = clamp(pl / uH, 0.0, 0.95);
+  float drop = 1.0 - sqrt(1.0 - leanFrac * leanFrac * s * s * 0.9);
+  float squash = 1.0 / (1.0 + 0.25 * leanFrac);
+  vec3 cline = vec3(uPull.x * s, position.y * squash * (1.0 - drop), uPull.y * s);
+  float ca = dot(position.xz, dir);
+  float cb = dot(position.xz, vec2(-dir.y, dir.x));
+  transformed = cline + ca * e1v + cb * e2v;
+`;
+const JELLY_NORMAL = /* glsl */`
+  float na = dot(objectNormal.xz, dir);
+  float nb = dot(objectNormal.xz, vec2(-dir.y, dir.x));
+  objectNormal = na * e1v + nb * e2v + objectNormal.y * Tv;
+`;
+const jellyColors = [0x8fe6e0, 0xa9ecd2, 0xf6e6a2, 0xbfe3f5, 0xd7f0c8, 0x9fd9ea];
+function makeJellyMaterial(color, uniforms) {
+  const mat = new THREE.MeshPhongMaterial({
+    color, transparent: true, opacity: 0.88,
+    shininess: 120, specular: 0xffffff, side: THREE.DoubleSide
+  });
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uPull = uniforms.uPull;
+    shader.uniforms.uH = uniforms.uH;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform vec2 uPull;\nuniform float uH;')
+      .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n{' + JELLY_FRAME + JELLY_NORMAL + '}')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n{' + JELLY_FRAME + JELLY_VERTEX + '}');
+  };
+  mat.customProgramCacheKey = () => 'jelly';
+  return mat;
+}
+
+/* ---------- 建物 ---------- */
+const city = new THREE.Group();
+scene.add(city);
+let buildings = []; // { mesh, u, v, h, base, uni }
+
+const params = { k: 60, damp: 3.2 };
+const MAX_PULL = 0.85; // 高さ比の引っぱり上限 — 倒れ込むところまで
+const softEl = document.getElementById('soft');
+const wobbleEl = document.getElementById('wobble');
+function applySliders() {
+  params.k = 160 - softEl.value * 1.4;
+  params.damp = 7.5 - wobbleEl.value * 0.065;
+}
+softEl.addEventListener('input', applySliders);
+wobbleEl.addEventListener('input', applySliders);
+applySliders();
+
+/* PLATEAU 建物用途コード → 揺れ方と色。商業はぷるんぷるん、官公庁は硬め */
+const USAGE = {
+  '401': { label: '業務施設',   mat: 3, kMul: 1.2 },
+  '402': { label: '商業施設',   mat: 2, kMul: 0.55 },
+  '403': { label: '宿泊施設',   mat: 2, kMul: 0.6 },
+  '404': { label: '商業系複合施設', mat: 2, kMul: 0.55 },
+  '411': { label: '住宅',       mat: 1, kMul: 0.85 },
+  '412': { label: '共同住宅',   mat: 1, kMul: 0.85 },
+  '413': { label: '店舗等併用住宅', mat: 1, kMul: 0.8 },
+  '414': { label: '店舗等併用共同住宅', mat: 1, kMul: 0.8 },
+  '421': { label: '官公庁施設', mat: 5, kMul: 1.6 },
+  '422': { label: '文教厚生施設', mat: 5, kMul: 1.5 },
+  '431': { label: '運輸倉庫施設', mat: 0, kMul: 1.35 },
+  '441': { label: '工場',       mat: 0, kMul: 1.4 },
+};
+const USAGE_DEFAULT = { label: '建物', mat: null, kMul: 1.0 };
+
+function addBuilding(geometry, base, h, matIndex, attr = USAGE_DEFAULT) {
+  const uni = { uPull: { value: new THREE.Vector2() }, uH: { value: Math.max(h, 3) } };
+  const color = jellyColors[(attr.mat ?? matIndex) % jellyColors.length];
+  const mesh = new THREE.Mesh(geometry, makeJellyMaterial(color, uni));
+  mesh.position.copy(base);
+  mesh.frustumCulled = false; // 変形で AABB を大きくはみ出すため
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox;
+  const footR = Math.max(2, ((bb.max.x - bb.min.x) + (bb.max.z - bb.min.z)) / 4);
+  const b = { mesh, u: new THREE.Vector2(), v: new THREE.Vector2(), h: Math.max(h, 3), base, uni,
+              kMul: attr.kMul, label: attr.label, fire: !!attr.fire, footR };
+  city.add(mesh);
+  buildings.push(b);
+  return b;
+}
+
+/* ---------- 近接ペア: 干渉と揺れの伝搬 ----------
+   都市生成時に一度だけ列挙。たわみの水平到達距離は
+   高さhovで最大 MAX_PULL*hov なので候補を絞れる。 */
+let pairs = [];
+const bendAt = (t) => 0.5 * (3 * t * t - t * t * t);
+function buildNeighbors() {
+  pairs = [];
+  for (let i = 0; i < buildings.length; i++) {
+    for (let j = i + 1; j < buildings.length; j++) {
+      const a = buildings[i], c = buildings[j];
+      const d = Math.hypot(c.base.x - a.base.x, c.base.z - a.base.z);
+      const hov = Math.min(a.h, c.h);
+      if (d < a.footR + c.footR + 1.7 * hov * MAX_PULL) {
+        // rr: 接触判定半径。基礎が最初から近い場合はめり込み分を差し引く
+        pairs.push({ a, c, d, hov, rr: Math.min(a.footR + c.footR, Math.max(d - 1, 0)) });
+      }
+    }
+  }
+}
+
+function clearCity() {
+  for (const b of buildings) { b.mesh.geometry.dispose(); b.mesh.material.dispose(); city.remove(b.mesh); }
+  buildings = [];
+  pairs = [];
+}
+
+/* ---------- デモ都市 ---------- */
+function buildDemoCity() {
+  clearCity();
+  const rng = () => Math.random();
+  const block = 46, road = 14, n = 7;
+  const off = -(n * (block + road)) / 2;
+  for (let gx = 0; gx < n; gx++) for (let gz = 0; gz < n; gz++) {
+    if (rng() < 0.08) continue;
+    const cx = off + gx * (block + road) + block / 2;
+    const cz = off + gz * (block + road) + block / 2;
+    const towers = 1 + Math.floor(rng() * 3);
+    for (let t = 0; t < towers; t++) {
+      const w = 10 + rng() * 16, d = 10 + rng() * 16;
+      const centerDist = Math.hypot(cx, cz);
+      const h = 12 + rng() * rng() * Math.max(10, 180 - centerDist * 0.5);
+      const geo = new THREE.BoxGeometry(w, h, d, 1, 8, 1); // 縦分割: 曲げを滑らかに
+      geo.translate(0, h / 2, 0);
+      const codes = Object.keys(USAGE);
+      const attr = { ...USAGE[codes[Math.floor(rng() * codes.length)]] };
+      if (rng() < 0.15) { attr.fire = true; attr.kMul *= 1.4; } // 耐火建築物
+      addBuilding(geo,
+        new THREE.Vector3(cx + (rng() - .5) * (block - w), 0, cz + (rng() - .5) * (block - d)),
+        h, 0, attr);
+    }
+  }
+  buildNeighbors();
+  setWorldExt(340);
+  say(`デモ都市 ${buildings.length}棟`);
+}
+buildDemoCity();
+
+/* ---------- CityGML パーサ (PLATEAU LOD1) ---------- */
+function parseCityGML(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('XMLとして読めませんでした');
+  const bldgs = doc.getElementsByTagNameNS('*', 'Building');
+  if (!bldgs.length) throw new Error('bldg:Building が見つかりません');
+
+  const firstPos = doc.getElementsByTagNameNS('*', 'posList')[0];
+  if (!firstPos) throw new Error('gml:posList が見つかりません');
+  const probe = firstPos.textContent.trim().split(/\s+/, 3).map(Number);
+  const geographic = probe[0] > 20 && probe[0] < 46 && probe[1] > 122 && probe[1] < 154;
+  let lat0 = 0, lon0 = 0, mPerLat = 1, mPerLon = 1;
+  if (geographic) {
+    lat0 = probe[0]; lon0 = probe[1];
+    mPerLat = 110950; mPerLon = 111320 * Math.cos(lat0 * Math.PI / 180);
+  }
+  const toLocal = geographic
+    ? (a, i) => [ (a[i+1] - lon0) * mPerLon, a[i+2] || 0, -(a[i] - lat0) * mPerLat ]
+    : (a, i) => [ a[i], a[i+2] || 0, a[i+1] ];
+
+  const MAX = 2000;
+  const parsed = [];
+  let minX = 1/0, maxX = -1/0, minZ = 1/0, maxZ = -1/0, minYAll = 1/0;
+
+  for (let bi = 0; bi < bldgs.length && parsed.length < MAX; bi++) {
+    // 属性: 用途コードと耐火構造 (uro:fireproofStructureType 1001=耐火)
+    const usageEl = bldgs[bi].getElementsByTagNameNS('*', 'usage')[0];
+    const attr = { ...(USAGE[usageEl?.textContent.trim()] ?? USAGE_DEFAULT) };
+    const fpEl = bldgs[bi].getElementsByTagNameNS('*', 'fireproofStructureType')[0];
+    if (fpEl && fpEl.textContent.trim() === '1001') { attr.fire = true; attr.kMul *= 1.4; }
+    const posLists = bldgs[bi].getElementsByTagNameNS('*', 'posList');
+    const verts = [];
+    let minY = 1/0, maxY = -1/0, cx = 0, cz = 0, cn = 0;
+    for (const pl of posLists) {
+      const a = pl.textContent.trim().split(/\s+/).map(Number);
+      const ring = [];
+      for (let i = 0; i + 2 < a.length; i += 3) {
+        const p = toLocal(a, i);
+        ring.push(p);
+        if (p[1] < minY) minY = p[1];
+        if (p[1] > maxY) maxY = p[1];
+        cx += p[0]; cz += p[2]; cn++;
+      }
+      for (let i = 1; i + 1 < ring.length; i++) verts.push(ring[0], ring[i], ring[i + 1]);
+    }
+    if (!verts.length || cn === 0) continue;
+    cx /= cn; cz /= cn;
+    const h = Math.max(maxY - minY, 3);
+    const arr = new Float32Array(verts.length * 3);
+    for (let i = 0; i < verts.length; i++) {
+      arr[i*3]   = verts[i][0] - cx;
+      arr[i*3+1] = verts[i][1] - minY;
+      arr[i*3+2] = verts[i][2] - cz;
+    }
+    parsed.push({ arr, cx, cz, minY, h, attr });
+    if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+    if (cz < minZ) minZ = cz; if (cz > maxZ) maxZ = cz;
+    if (minY < minYAll) minYAll = minY;
+  }
+  if (!parsed.length) throw new Error('ジオメトリを抽出できませんでした');
+
+  clearCity();
+  const ox = (minX + maxX) / 2, oz = (minZ + maxZ) / 2;
+  for (let i = 0; i < parsed.length; i++) {
+    const p = parsed[i];
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(p.arr, 3));
+    geo.computeVertexNormals();
+    addBuilding(geo, new THREE.Vector3(p.cx - ox, p.minY - minYAll, p.cz - oz), p.h, i, p.attr);
+  }
+  buildNeighbors();
+  const span = Math.max(maxX - minX, maxZ - minZ, 100);
+  setWorldExt(span * 0.7);
+  camera.position.set(span * 0.6, span * 0.5, span * 0.8);
+  controls.target.set(0, 20, 0);
+  const truncated = bldgs.length > MAX ? `(先頭${MAX}棟)` : '';
+  say(`CityGML読込: ${parsed.length}棟 ${truncated}`);
+}
+
+document.getElementById('file').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  say(`解析中… (${(f.size / 1048576).toFixed(1)} MB)`);
+  try {
+    const text = await f.text();
+    await new Promise(r => setTimeout(r, 30));
+    parseCityGML(text);
+  } catch (err) {
+    say(`読み込み失敗: ${err.message}`);
+  }
+});
+document.getElementById('demo').addEventListener('click', buildDemoCity);
+
+/* ---------- 力を加えるインターフェース ---------- */
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+let grabbed = null;
+const motionScale = reduceMotion ? 0.35 : 1;
+
+function setNDC(ev) {
+  ndc.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+}
+
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  setNDC(ev);
+  const hits = ray.intersectObjects(city.children);
+  if (hits.length) {
+    const mesh = hits[0].object;
+    grabbed = buildings.find(b => b.mesh === mesh) || null;
+    if (grabbed) {
+      controls.enabled = false;
+      say(`つかんだ: ${grabbed.label}${grabbed.fire ? '・耐火' : ''} (高さ${Math.round(grabbed.h)}m)`);
+    }
+  } else {
+    const pt = new THREE.Vector3();
+    if (ray.ray.intersectPlane(groundPlane, pt)) shockwave(pt);
+  }
+});
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  if (!grabbed) return;
+  setNDC(ev);
+  const planeAtTop = new THREE.Plane(new THREE.Vector3(0, 1, 0), -grabbed.h * 0.7);
+  const pt = new THREE.Vector3();
+  if (ray.ray.intersectPlane(planeAtTop, pt)) {
+    const maxPull = grabbed.h * MAX_PULL;
+    grabbed.u.set(
+      THREE.MathUtils.clamp(pt.x - grabbed.base.x, -maxPull, maxPull),
+      THREE.MathUtils.clamp(pt.z - grabbed.base.z, -maxPull, maxPull));
+    grabbed.v.set(0, 0);
+  }
+});
+addEventListener('pointerup', () => {
+  if (grabbed) {
+    // 離した反動を地盤ゼリーに伝える
+    wave?.addImpulse(grabbed.base.x, grabbed.base.z,
+      Math.min(grabbed.u.length() * 0.08, 2.0) * motionScale, 3.0);
+    grabbed = null; controls.enabled = true;
+  }
+});
+
+function shockwave(center) {
+  wave?.addImpulse(center.x, center.z, 2.4 * motionScale, 3.0);
+  for (const b of buildings) {
+    const dx = b.base.x - center.x, dz = b.base.z - center.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const amp = 65 * Math.exp(-d / 120) * motionScale;
+    if (amp < 0.3) continue;
+    b.v.x += (dx / d) * amp;
+    b.v.y += (dz / d) * amp;
+  }
+}
+
+let quakeT = 0;
+document.getElementById('quake').addEventListener('click', () => { quakeT = 2.2; say('地震発生'); });
+document.getElementById('poke').addEventListener('click', pokeRandom);
+document.getElementById('reset').addEventListener('click', () => {
+  for (const b of buildings) { b.u.set(0,0); b.v.set(0,0); b.uni.uPull.value.set(0,0); }
+  quakeT = 0; say('静止');
+});
+function pokeRandom() {
+  const b = buildings[Math.floor(Math.random() * buildings.length)];
+  if (!b) return;
+  const a = Math.random() * Math.PI * 2;
+  b.v.set(Math.cos(a), Math.sin(a)).multiplyScalar((22 + Math.random() * 26) * motionScale);
+}
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'q' || e.key === 'Q') document.getElementById('quake').click();
+  if (e.key === 'p' || e.key === 'P') pokeRandom();
+  if (e.key === 'r' || e.key === 'R') document.getElementById('reset').click();
+});
+
+/* ---------- 加速度センサー (スマホを振る) ---------- */
+const shakeBtn = document.getElementById('shake');
+if ('DeviceMotionEvent' in window) shakeBtn.hidden = false;
+let lastAccel = null;
+function onDeviceMotion(e) {
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x == null) return;
+  if (lastAccel) {
+    // 加速度の変化量(ジャーク)だけに反応 → 傾けただけでは揺れない
+    const jx = a.x - lastAccel.x, jy = a.y - lastAccel.y;
+    const mag = Math.hypot(jx, jy);
+    if (mag > 3) {
+      const s = Math.min(mag, 25) * 1.6 * motionScale;
+      for (const b of buildings) { b.v.x += (jx / mag) * s; b.v.y += (jy / mag) * s; }
+    }
+  }
+  lastAccel = { x: a.x, y: a.y };
+}
+shakeBtn.addEventListener('click', async () => {
+  try {
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+      const res = await DeviceMotionEvent.requestPermission();
+      if (res !== 'granted') { say('センサー利用が許可されませんでした'); return; }
+    }
+    addEventListener('devicemotion', onDeviceMotion);
+    shakeBtn.disabled = true;
+    shakeBtn.textContent = 'センサー有効';
+    say('端末を振ってみてください');
+  } catch { say('このブラウザではセンサーを使えません'); }
+});
+
+/* ---------- パネル最小化 ---------- */
+const foldBtn = document.getElementById('fold');
+foldBtn.addEventListener('click', () => {
+  const folded = document.getElementById('panel').classList.toggle('folded');
+  foldBtn.setAttribute('aria-expanded', String(!folded));
+  foldBtn.textContent = folded ? '開く' : '最小化';
+});
+
+/* ---------- アニメーション ---------- */
+let paused = false;
+const motionBtn = document.getElementById('motion');
+motionBtn.addEventListener('click', () => {
+  paused = !paused;
+  motionBtn.setAttribute('aria-pressed', String(paused));
+  motionBtn.textContent = paused ? '再開' : '一時停止';
+  say(paused ? '揺れを一時停止(視点操作は可能)' : '揺れを再開');
+});
+
+const clock = new THREE.Clock();
+const _grad = new THREE.Vector2();
+function tick() {
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  controls.update();
+  if (!paused) {
+    if (wave) wave.step();
+    if (quakeT > 0) {
+      quakeT -= dt;
+      if (wave && Math.random() < 0.3) {
+        wave.addImpulse((Math.random() * 2 - 1) * worldExt * 0.5,
+                        (Math.random() * 2 - 1) * worldExt * 0.5, 1.6 * motionScale, 5.0);
+      }
+      const t = performance.now() / 1000;
+      for (const b of buildings) {
+        b.v.x += (Math.sin(t * 9 + b.base.z * 0.02) * 55 + (Math.random() - .5) * 30) * dt * motionScale;
+        b.v.y += (Math.cos(t * 7 + b.base.x * 0.02) * 55 + (Math.random() - .5) * 30) * dt * motionScale;
+      }
+    }
+    for (const b of buildings) {
+      if (b === grabbed) { b.uni.uPull.value.copy(b.u); continue; }
+      const still = b.u.lengthSq() < 1e-6 && b.v.lengthSq() < 1e-6;
+      if (still) {
+        if (b.uni.uPull.value.lengthSq() > 0) { b.u.set(0,0); b.v.set(0,0); b.uni.uPull.value.set(0,0); }
+        continue;
+      }
+      // 減衰バネ + 大変位での軟化 (ゼリーの降伏 → 倒れ込み感)
+      const lean = Math.min(b.u.length() / b.h, 1);
+      const kEff = params.k * b.kMul * (1 - 0.55 * lean);
+      b.v.x += (-kEff * b.u.x - params.damp * b.v.x) * dt;
+      b.v.y += (-kEff * b.u.y - params.damp * b.v.y) * dt;
+      b.u.x += b.v.x * dt;
+      b.u.y += b.v.y * dt;
+      const maxPull = b.h * MAX_PULL;
+      b.u.x = THREE.MathUtils.clamp(b.u.x, -maxPull, maxPull);
+      b.u.y = THREE.MathUtils.clamp(b.u.y, -maxPull, maxPull);
+      b.uni.uPull.value.copy(b.u);
+    }
+    /* 干渉と伝搬 */
+    for (const p of pairs) {
+      const { a, c, hov } = p;
+      if (a.u.lengthSq() + c.u.lengthSq() < 1e-4) continue;
+      const gA = a === grabbed, gC = c === grabbed;
+      // 伝搬: 地盤ゼリーを介した弱い結合 (変位差に比例、距離で減衰)
+      const cc = 6.0 * Math.exp(-p.d / 80) * dt;
+      if (!gA) { a.v.x += (c.u.x - a.u.x) * cc; a.v.y += (c.u.y - a.u.y) * cc; }
+      if (!gC) { c.v.x += (a.u.x - c.u.x) * cc; c.v.y += (a.u.y - c.u.y) * cc; }
+      // 接触: 重なり合う高さ hov で断面円を評価し、重なればペナルティで押し返す
+      const sA = bendAt(Math.min(hov / a.h, 1)), sC = bendAt(Math.min(hov / c.h, 1));
+      const px = (c.base.x + c.u.x * sC) - (a.base.x + a.u.x * sA);
+      const pz = (c.base.z + c.u.y * sC) - (a.base.z + a.u.y * sA);
+      const dist = Math.hypot(px, pz) || 1e-4;
+      const pen = p.rr - dist;
+      if (pen > 0) {
+        const nx = px / dist, nz = pz / dist;
+        // 頂部変位に換算するため断面での曲げ係数 s で割る (掴んだ建物は不動)
+        const wA = gA ? 0 : 1 / Math.max(sA, 0.3);
+        const wC = gC ? 0 : 1 / Math.max(sC, 0.3);
+        const push = pen * 30 * dt;
+        a.v.x -= nx * push * wA; a.v.y -= nz * push * wA;
+        c.v.x += nx * push * wC; c.v.y += nz * push * wC;
+        // めり込みの直接解消 (ぷにっと押しのける)
+        a.u.x -= nx * pen * 0.12 * wA; a.u.y -= nz * pen * 0.12 * wA;
+        c.u.x += nx * pen * 0.12 * wC; c.u.y += nz * pen * 0.12 * wC;
+        if (!gA) a.uni.uPull.value.copy(a.u);
+        if (!gC) c.uni.uPull.value.copy(c.u);
+      }
+    }
+    /* WebGPU地盤: 建物は波に乗って上下し、斜面で揺すられる */
+    if (wave) {
+      for (const b of buildings) {
+        b.mesh.position.y = b.base.y + wave.heightAt(b.base.x, b.base.z) * 1.5;
+        wave.gradAt(b.base.x, b.base.z, _grad);
+        if (_grad.x !== 0 || _grad.y !== 0) {
+          b.v.x -= _grad.x * 6 * dt;
+          b.v.y -= _grad.y * 6 * dt;
+        }
+      }
+    }
+  }
+  renderer.render(scene, camera);
+}
+tick();
+
+/* 検証用デバッグAPI */
+window.__puru = { buildings: () => buildings, parseCityGML, wave: () => wave };
+
+/* ---------- 泡 (装飾) ---------- */
+if (!reduceMotion) {
+  for (let i = 0; i < 14; i++) {
+    const b = document.createElement('div');
+    b.className = 'bubble';
+    b.setAttribute('aria-hidden', 'true');
+    const s = 8 + Math.random() * 26;
+    b.style.width = b.style.height = s + 'px';
+    b.style.left = Math.random() * 100 + 'vw';
+    b.style.animationDuration = 9 + Math.random() * 14 + 's';
+    b.style.animationDelay = -Math.random() * 20 + 's';
+    document.body.appendChild(b);
+  }
+}
+</script>
+</body>
+</html>
