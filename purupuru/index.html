@@ -20,7 +20,11 @@
     background: linear-gradient(170deg, #eafcff 0%, #d7f8f2 45%, #d0f3e4 100%);
     color: var(--soda-deep);
   }
-  #scene { position: fixed; inset: 0; display: block; touch-action: none; }
+  #scene {
+    position: fixed; top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    display: block; touch-action: none;
+  }
 
   .bubble {
     position: fixed; border-radius: 50%;
@@ -117,17 +121,30 @@
     max-width: min(460px, calc(100vw - 24px));
   }
 
-  /* レスポンシブ: 縦持ちスマホではパネルを下部に */
+  /* レスポンシブ: スマホ幅ではオーバーレイをやめ、
+     ビュー(上) → ステータス → コントロール(下) の縦積みでスクロール */
   @media (max-width: 720px) {
-    header { max-width: calc(100vw - 24px); }
-    header p { display: none; }
+    html, body { overflow-y: auto; height: auto; }
+    body { display: flex; flex-direction: column; }
+    #status { order: 1; }
+    #panel { order: 2; }
+    #scene {
+      position: relative; inset: auto;
+      width: 100vw; height: 60vh; height: 60svh;
+    }
+    header { position: absolute; max-width: calc(100vw - 24px); }
+    header p { font-size: .68rem; }
+    #status {
+      position: static; display: block;
+      margin: 10px 12px 0; max-width: none;
+    }
     #panel {
-      top: auto; bottom: 12px; left: 12px; right: 12px; width: auto;
-      max-height: 42vh; overflow-y: auto;
+      position: static; width: auto;
+      margin: 8px 12px 20px;
     }
     #panel-body { display: flex; flex-wrap: wrap; gap: 6px; }
     fieldset { flex: 1 1 45%; margin: 0; }
-    #status { bottom: auto; top: 64px; }
+    #fold { display: none; } /* 縦積みでは最小化不要 */
   }
 </style>
 </head>
@@ -366,8 +383,11 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
 })();
 
 function resize() {
-  renderer.setSize(innerWidth, innerHeight);
-  camera.aspect = innerWidth / innerHeight;
+  // キャンバスの実表示サイズに合わせる (モバイルでは縦積みで 100vh でなくなる)
+  const w = canvas.clientWidth || innerWidth;
+  const h = canvas.clientHeight || innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
 addEventListener('resize', resize); resize();
@@ -633,7 +653,9 @@ let grabbed = null;
 const motionScale = reduceMotion ? 0.35 : 1;
 
 function setNDC(ev) {
-  ndc.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
+  const r = canvas.getBoundingClientRect();
+  ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1,
+          -((ev.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
 }
 
@@ -710,19 +732,17 @@ addEventListener('keydown', (e) => {
 const shakeBtn = document.getElementById('shake');
 if ('DeviceMotionEvent' in window) shakeBtn.hidden = false;
 let lastAccel = null;
+let shakeE = 0; // シェイクエネルギー: イベント単位でなくフレーム側で加振する
 function onDeviceMotion(e) {
   const a = e.accelerationIncludingGravity;
   if (!a || a.x == null) return;
   if (lastAccel) {
-    // 加速度の変化量(ジャーク)だけに反応 → 傾けただけでは揺れない
-    const jx = a.x - lastAccel.x, jy = a.y - lastAccel.y;
-    const mag = Math.hypot(jx, jy);
-    if (mag > 3) {
-      const s = Math.min(mag, 25) * 1.6 * motionScale;
-      for (const b of buildings) { b.v.x += (jx / mag) * s; b.v.y += (jy / mag) * s; }
-    }
+    // ジャーク(変化量)を積算 → 傾けただけでは溜まらない。
+    // 60Hz配信では1サンプルの変化が小さいので、閾値は低く・積算で拾う
+    const j = Math.hypot(a.x - lastAccel.x, a.y - lastAccel.y, (a.z ?? 0) - lastAccel.z);
+    if (j > 1.2) shakeE = Math.min(shakeE + j * 0.05, 1.5);
   }
-  lastAccel = { x: a.x, y: a.y };
+  lastAccel = { x: a.x, y: a.y, z: a.z ?? 0 };
 }
 shakeBtn.addEventListener('click', async () => {
   try {
@@ -763,6 +783,20 @@ function tick() {
   controls.update();
   if (!paused) {
     if (wave) wave.step();
+    /* シェイク: 溜まったエネルギーで地震と同様に加振 (床と建物の両方) */
+    if (shakeE > 0.05) {
+      const ts = performance.now() / 1000;
+      const amp = 90 * shakeE * motionScale;
+      for (const b of buildings) {
+        b.v.x += (Math.sin(ts * 11 + b.base.z * 0.03) * amp + (Math.random() - .5) * amp) * dt;
+        b.v.y += (Math.cos(ts * 9 + b.base.x * 0.03) * amp + (Math.random() - .5) * amp) * dt;
+      }
+      if (wave && Math.random() < 0.4 * shakeE) {
+        wave.addImpulse((Math.random() * 2 - 1) * worldExt * 0.4,
+                        (Math.random() * 2 - 1) * worldExt * 0.4, 1.2 * motionScale, 5.0);
+      }
+      shakeE = Math.max(0, shakeE - dt * 1.2);
+    }
     if (quakeT > 0) {
       quakeT -= dt;
       if (wave && Math.random() < 0.3) {
