@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>ワイヤーフレーム</title>
+    <title>水辺のライン認識</title>
     <style>
         html, body { margin: 0; height: 100%; overflow: hidden; background: #000;
                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
@@ -17,15 +17,13 @@
             z-index: 0;
         }
 
-        /* エッジの発光レイヤ。毎フレーム描き直すのでトラッキング不要 */
-        #edge-layer {
+        #overlay-layer {
             position: fixed;
             inset: 0;
             width: 100%;
             height: 100%;
             z-index: 1;
             pointer-events: none;
-            filter: blur(0.6px);
         }
 
         #start-overlay {
@@ -58,6 +56,23 @@
             line-height: 1.8;
         }
 
+        #hud {
+            position: fixed;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 5;
+            background: rgba(0,0,0,0.65);
+            color: #fff;
+            font-size: 14px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            max-width: 92%;
+            text-align: center;
+            pointer-events: none;
+        }
+        #hud.hidden { display: none; }
+
         #controls {
             position: fixed;
             bottom: 20px;
@@ -69,117 +84,53 @@
             font-size: 13px;
             padding: 10px 18px;
             border-radius: 8px;
-            display: flex;
+            display: grid;
+            grid-template-columns: auto 1fr;
             align-items: center;
-            gap: 10px;
+            gap: 6px 10px;
         }
         #controls.hidden { display: none; }
-        #controls input[type="range"] { width: 140px; }
+        #controls input[type="range"] { width: 150px; }
     </style>
 </head>
 <body>
     <video id="camera-feed" autoplay muted playsinline></video>
-    <canvas id="edge-layer"></canvas>
+    <canvas id="overlay-layer"></canvas>
 
     <div id="start-overlay">
-        <h1 style="font-size:26px; margin-bottom:16px;">ワイヤーフレーム</h1>
+        <h1 style="font-size:26px; margin-bottom:16px;">水辺のライン認識</h1>
         <button id="start-button">カメラを起動</button>
         <p>
-            カメラに映った輪郭を毎フレーム検出し、線として発光表示します。<br>
-            建物や室内など、エッジのはっきりした対象に向けてください。
+            水面を水平な面として認識し、面のあちこちから光の粒を立ち上らせます。<br>
+            画面の下半分に水面が入るように構えてください。<br>
+            認識位置がずれるときは、画面に映った水面をタップしてください。
         </p>
     </div>
 
+    <div id="hud" class="hidden"><span id="hud-text"></span></div>
     <div id="controls" class="hidden">
-        <label for="threshold">感度</label>
-        <input type="range" id="threshold" min="40" max="200" value="100">
+        <label for="tolerance">色の許容差</label>
+        <input type="range" id="tolerance" min="8" max="60" value="26">
+        <label for="cam-height">カメラの高さ</label>
+        <input type="range" id="cam-height" min="0.8" max="4.0" step="0.1" value="1.5">
     </div>
 
+    <script src="waterline.js"></script>
     <script>
-    // =====================================================================
-    // 画面空間エフェクトの実装。
-    // 3D復元もトラッキングもせず、毎フレーム画像からエッジを計算して
-    // そのまま重ねる。出どころが画像自体なので、対象とのズレは起きない。
-    // =====================================================================
-    const PROC_WIDTH = 240;   // 画像処理の解像度 (幅)
-
     const video = document.getElementById('camera-feed');
-    const edgeLayer = document.getElementById('edge-layer');
-    const edgeCtx = edgeLayer.getContext('2d');
-    const thresholdInput = document.getElementById('threshold');
-
-    const procCanvas = document.createElement('canvas');
-    const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
-    const outCanvas = document.createElement('canvas');
-    const outCtx = outCanvas.getContext('2d');
-
-    let gray = null, outImage = null;
-
-    function processFrame() {
-        const vw = video.videoWidth, vh = video.videoHeight;
-        if (!vw) return;
-
-        const W = PROC_WIDTH;
-        const H = Math.round(W * vh / vw);
-        if (procCanvas.width !== W || procCanvas.height !== H) {
-            procCanvas.width = W;
-            procCanvas.height = H;
-            outCanvas.width = W;
-            outCanvas.height = H;
-            gray = new Float32Array(W * H);
-            outImage = outCtx.createImageData(W, H);
-        }
-
-        procCtx.drawImage(video, 0, 0, W, H);
-        const src = procCtx.getImageData(0, 0, W, H).data;
-        for (let i = 0; i < W * H; i++) {
-            gray[i] = 0.299 * src[i * 4] + 0.587 * src[i * 4 + 1] + 0.114 * src[i * 4 + 2];
-        }
-
-        // Sobel: しきい値を超えたエッジ強度をシアンのアルファに変換
-        const thr = 240 - Number(thresholdInput.value);  // スライダーは「感度」なので反転
-        const out = outImage.data;
-        out.fill(0);
-        for (let y = 1; y < H - 1; y++) {
-            for (let x = 1; x < W - 1; x++) {
-                const i = y * W + x;
-                const gx = (gray[i - W + 1] + 2 * gray[i + 1] + gray[i + W + 1])
-                         - (gray[i - W - 1] + 2 * gray[i - 1] + gray[i + W - 1]);
-                const gy = (gray[i + W - 1] + 2 * gray[i + W] + gray[i + W + 1])
-                         - (gray[i - W - 1] + 2 * gray[i - W] + gray[i - W + 1]);
-                const mag = Math.abs(gx) + Math.abs(gy);
-                if (mag > thr) {
-                    const a = Math.min(255, (mag - thr) * 2);
-                    const o = i * 4;
-                    out[o] = 120;      // R: 少し青緑に寄せる
-                    out[o + 1] = 255;  // G
-                    out[o + 2] = 255;  // B
-                    out[o + 3] = a;
-                }
-            }
-        }
-        outCtx.putImageData(outImage, 0, 0);
-
-        // object-fit: cover と同じ切り出しで画面サイズへ拡大
-        const sw = edgeLayer.width, sh = edgeLayer.height;
-        const scale = Math.max(sw / W, sh / H);
-        const dw = W * scale, dh = H * scale;
-        edgeCtx.clearRect(0, 0, sw, sh);
-        edgeCtx.globalCompositeOperation = 'lighter';
-        edgeCtx.drawImage(outCanvas, (sw - dw) / 2, (sh - dh) / 2, dw, dh);
-    }
-
-    function loop() {
-        processFrame();
-        requestAnimationFrame(loop);
-    }
-
-    function resize() {
-        edgeLayer.width = innerWidth * devicePixelRatio;
-        edgeLayer.height = innerHeight * devicePixelRatio;
-    }
+    const hud = document.getElementById('hud');
+    const hudText = document.getElementById('hud-text');
 
     async function start() {
+        // iOS: DeviceOrientation はユーザー操作起点の許可が必要
+        if (typeof DeviceOrientationEvent !== 'undefined' &&
+            typeof DeviceOrientationEvent.requestPermission === 'function') {
+            try { await DeviceOrientationEvent.requestPermission(); } catch (e) { /* 拒否時も続行 */ }
+        }
+        window.addEventListener('deviceorientation', e => {
+            Waterline.setOrientation(e.alpha, e.beta, e.gamma);
+        });
+
         try {
             video.srcObject = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode: 'environment', width: { ideal: 1280 } },
@@ -192,12 +143,28 @@
         }
         document.getElementById('start-overlay').classList.add('hidden');
         document.getElementById('controls').classList.remove('hidden');
-        resize();
-        loop();
+
+        Waterline.init({
+            source: video,
+            getW: () => video.videoWidth,
+            getH: () => video.videoHeight,
+            layer: document.getElementById('overlay-layer'),
+            toleranceInput: document.getElementById('tolerance'),
+            camHeightInput: document.getElementById('cam-height'),
+            onStatus: t => { hud.classList.remove('hidden'); hudText.textContent = t; },
+        });
+
+        window.addEventListener('click', ev => {
+            if (Waterline.setSeedFromScreen(ev.clientX, ev.clientY)) {
+                hudText.textContent = 'タップ位置を水面として認識し直します';
+            }
+        });
     }
 
-    window.addEventListener('resize', resize);
     document.getElementById('start-button').addEventListener('click', start);
+    document.getElementById('controls').addEventListener('click', e => e.stopPropagation());
+    // 開始画面のクリックがwindowのタップ処理 (シード指定) に届かないようにする
+    document.getElementById('start-overlay').addEventListener('click', e => e.stopPropagation());
     </script>
 </body>
 </html>
