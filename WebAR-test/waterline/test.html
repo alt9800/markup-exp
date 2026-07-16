@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>水辺のライン認識 — 画像テスト</title>
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #000;
+                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+        /* 静止画をカメラ映像の代わりに敷く */
+        #photo-canvas {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+        }
+
+        #overlay-layer {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        #picker {
+            position: fixed;
+            inset: 0;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: #14141e;
+            color: #fff;
+            text-align: center;
+            padding: 24px;
+        }
+        #picker.hidden { display: none; }
+        #picker.dragover { background: #1c2340; }
+        .picker-button {
+            padding: 14px 36px;
+            font-size: 17px;
+            font-weight: bold;
+            color: #111;
+            background: #e8e8e8;
+            border: none;
+            border-radius: 8px;
+            margin: 6px;
+        }
+        #picker p {
+            margin-top: 18px;
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+            line-height: 1.8;
+        }
+
+        #hud {
+            position: fixed;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 5;
+            background: rgba(0,0,0,0.65);
+            color: #fff;
+            font-size: 14px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            max-width: 92%;
+            text-align: center;
+            pointer-events: none;
+        }
+        #hud.hidden { display: none; }
+
+        #controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 5;
+            background: rgba(0,0,0,0.55);
+            color: #fff;
+            font-size: 13px;
+            padding: 10px 18px;
+            border-radius: 8px;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            gap: 6px 10px;
+        }
+        #controls.hidden { display: none; }
+        #controls input[type="range"] { width: 130px; }
+        #controls output { min-width: 3.5em; text-align: right; }
+        #controls button {
+            grid-column: 1 / -1;
+            padding: 8px;
+            font-size: 13px;
+            color: #fff;
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.4);
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="photo-canvas"></canvas>
+    <canvas id="overlay-layer"></canvas>
+
+    <div id="picker">
+        <h1 style="font-size:24px; margin-bottom:14px;">水辺のライン認識 — 画像テスト</h1>
+        <button class="picker-button" id="file-button">写真を選ぶ</button>
+        <button class="picker-button" id="sample-button">合成サンプルで試す</button>
+        <p>
+            川や水辺の写真で認識パイプラインを検証するテストページです。<br>
+            ここに画像ファイルをドロップしても読み込めます。<br>
+            URLに ?img=画像パス を付けると直接読み込みます。<br>
+            ジャイロの代わりに、下部のスライダーでカメラの俯角を与えてください。
+        </p>
+        <input type="file" id="file-input" accept="image/*" hidden>
+    </div>
+
+    <div id="hud" class="hidden"><span id="hud-text"></span></div>
+    <div id="controls" class="hidden">
+        <label for="tolerance">色の許容差</label>
+        <input type="range" id="tolerance" min="8" max="60" value="26">
+        <output id="tolerance-out">26</output>
+        <label for="cam-height">カメラの高さ</label>
+        <input type="range" id="cam-height" min="0.8" max="8.0" step="0.1" value="1.5">
+        <output id="cam-height-out">1.5m</output>
+        <label for="pitch">俯角</label>
+        <input type="range" id="pitch" min="0" max="80" step="1" value="20">
+        <output id="pitch-out">20°</output>
+        <button id="change-photo">別の写真にする</button>
+    </div>
+
+    <script src="waterline.js"></script>
+    <script>
+    // カメラ映像の代わりに、写真を描いた canvas をソースとして
+    // waterline.js のパイプラインに渡す。ロジックは本番 (index.html) と同一。
+    const photoCanvas = document.getElementById('photo-canvas');
+    const photoCtx = photoCanvas.getContext('2d');
+    const picker = document.getElementById('picker');
+    const hud = document.getElementById('hud');
+    const hudText = document.getElementById('hud-text');
+    let started = false;
+
+    function applyPitch() {
+        // 縦持ちでカメラ水平が beta=90。俯角ぶんだけ下に向ける
+        const pitch = Number(document.getElementById('pitch').value);
+        Waterline.setOrientation(0, 90 - pitch, 0);
+        document.getElementById('pitch-out').textContent = `${pitch}°`;
+    }
+
+    function startWith(imageSource, w, h) {
+        photoCanvas.width = w;
+        photoCanvas.height = h;
+        photoCtx.drawImage(imageSource, 0, 0, w, h);
+
+        picker.classList.add('hidden');
+        document.getElementById('controls').classList.remove('hidden');
+        applyPitch();
+
+        if (!started) {
+            started = true;
+            Waterline.init({
+                source: photoCanvas,
+                getW: () => photoCanvas.width,
+                getH: () => photoCanvas.height,
+                layer: document.getElementById('overlay-layer'),
+                toleranceInput: document.getElementById('tolerance'),
+                camHeightInput: document.getElementById('cam-height'),
+                onStatus: t => { hud.classList.remove('hidden'); hudText.textContent = t; },
+            });
+            window.addEventListener('click', ev => {
+                if (Waterline.setSeedFromScreen(ev.clientX, ev.clientY)) {
+                    hudText.textContent = 'タップ位置を水面として認識し直します';
+                }
+            });
+        } else {
+            Waterline.reset();
+        }
+    }
+
+    async function loadFile(file) {
+        const bmp = await createImageBitmap(file);
+        // 処理は低解像度で行うので、表示用も長辺1600px程度に抑える
+        const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+        startWith(bmp, Math.round(bmp.width * scale), Math.round(bmp.height * scale));
+    }
+
+    async function loadUrl(url) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = url;
+        await img.decode();
+        const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+        startWith(img, Math.round(img.naturalWidth * scale), Math.round(img.naturalHeight * scale));
+    }
+
+    // 合成サンプル: 護岸テクスチャ + 緑の水面 + 空の反射パッチ
+    function loadSynthetic() {
+        const c = document.createElement('canvas');
+        c.width = 640; c.height = 960;
+        const g = c.getContext('2d');
+        g.fillStyle = '#a8c4de'; g.fillRect(0, 0, 640, 200);            // 空
+        for (let y = 200; y < 560; y += 4) for (let x = 0; x < 640; x += 4) {
+            const v = 130 + Math.random() * 60;
+            g.fillStyle = `rgb(${v},${v-10},${v-20})`; g.fillRect(x, y, 4, 4);   // 護岸
+        }
+        for (let y = 560; y < 960; y += 4) for (let x = 0; x < 640; x += 4) {
+            const v = Math.random() * 14;
+            g.fillStyle = `rgb(${96+v},${118+v},${88+v})`; g.fillRect(x, y, 4, 4); // 水面
+        }
+        g.fillStyle = 'rgb(190,205,215)';
+        g.beginPath(); g.ellipse(200, 700, 70, 25, 0, 0, Math.PI*2); g.fill();   // 反射
+        g.beginPath(); g.ellipse(450, 820, 90, 30, 0, 0, Math.PI*2); g.fill();
+        startWith(c, c.width, c.height);
+    }
+
+    // 入力経路: ファイル選択 / ドラッグ&ドロップ / ?img= / 合成サンプル
+    const fileInput = document.getElementById('file-input');
+    document.getElementById('file-button').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files[0]) loadFile(fileInput.files[0]);
+    });
+    document.getElementById('sample-button').addEventListener('click', loadSynthetic);
+    document.getElementById('change-photo').addEventListener('click', (e) => {
+        e.stopPropagation();
+        picker.classList.remove('hidden');
+    });
+    document.getElementById('controls').addEventListener('click', e => e.stopPropagation());
+    // picker内のクリックがwindowのタップ処理 (シード指定) に届かないようにする
+    picker.addEventListener('click', e => e.stopPropagation());
+    document.getElementById('pitch').addEventListener('input', applyPitch);
+    document.getElementById('tolerance').addEventListener('input', e => {
+        document.getElementById('tolerance-out').textContent = e.target.value;
+    });
+    document.getElementById('cam-height').addEventListener('input', e => {
+        document.getElementById('cam-height-out').textContent = `${e.target.value}m`;
+    });
+
+    window.addEventListener('dragover', e => { e.preventDefault(); picker.classList.add('dragover'); });
+    window.addEventListener('dragleave', () => picker.classList.remove('dragover'));
+    window.addEventListener('drop', e => {
+        e.preventDefault();
+        picker.classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith('image/')) loadFile(file);
+    });
+
+    const imgParam = new URLSearchParams(location.search).get('img');
+    if (imgParam) loadUrl(imgParam).catch(e => alert(`画像を読み込めません: ${e.message}`));
+    </script>
+</body>
+</html>
