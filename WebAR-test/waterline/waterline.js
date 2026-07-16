@@ -50,6 +50,7 @@ window.Waterline = (function () {
     let particles = [];
     let lastTime = null;
     let running = false;
+    let debug = {};   // 直近の検出の内部統計 (チューニング・実写デバッグ用)
 
     // ---------------------------------------------------------------
     // 姿勢: DeviceOrientation → クォータニオン (W3C仕様の Z-X'-Y'' 順)
@@ -152,15 +153,15 @@ window.Waterline = (function () {
         // 色の比較は「輝度に鈍く、色味に敏感」にする。
         // 水面は空の反射 (明) と影・藻 (暗) で輝度が大きく割れる一方、
         // 色味は保たれやすい (実写の池・運河の写真での観察に基づく)。
-        // 特徴量: [Y(輝度), Cr(R-Y), Cb(B-Y)]、距離 = 0.35|dY| + 1.3(|dCr|+|dCb|)
+        // 特徴量: [Y(輝度), Cr(R-Y), Cb(B-Y)]、距離 = 0.25|dY| + 1.6(|dCr|+|dCb|)
         function features(o) {
             const r = src[o], g = src[o + 1], b = src[o + 2];
             const y = 0.299 * r + 0.587 * g + 0.114 * b;
             return [y, r - y, b - y];
         }
         function dist(f, c) {
-            return 0.35 * Math.abs(f[0] - c[0])
-                 + 1.3 * (Math.abs(f[1] - c[1]) + Math.abs(f[2] - c[2]));
+            return 0.25 * Math.abs(f[0] - c[0])
+                 + 1.6 * (Math.abs(f[1] - c[1]) + Math.abs(f[2] - c[2]));
         }
 
         // シード: ユーザーがタップした場合はその1点、既定では画面下部に
@@ -190,48 +191,131 @@ window.Waterline = (function () {
             if (near) {
                 near.seeds.push(sy * W + sx);
             } else {
-                clusters.push({ f, seeds: [sy * W + sx] });
+                clusters.push({ f, f0: f.slice(), seeds: [sy * W + sx] });
             }
         }
 
+        // テクスチャ判定用の輝度勾配マップ。水面は滑らか (低勾配)、
+        // 植生・樹木・護岸は高テクスチャ (高勾配) という違いをクラスタ選別に使う
+        const luma = new Float32Array(W * H);
+        for (let i = 0; i < W * H; i++) {
+            const o = i * 4;
+            luma[i] = 0.299 * src[o] + 0.587 * src[o + 1] + 0.114 * src[o + 2];
+        }
+        const grad = new Float32Array(W * H);
+        for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+                const i = y * W + x;
+                grad[i] = Math.abs(luma[i + 1] - luma[i - 1])
+                        + Math.abs(luma[i + W] - luma[i - W]);
+            }
+        }
+
+        // 幾何制約: 水面は水平な平面なので、地平線より上の画素は水ではありえない。
+        // 現在のカメラ姿勢で「水平面と交わる最上端の行」を求め、BFSをそこに制限する。
+        // 空 (および空を反射した水面と同色の領域が空へ繋がる問題) を構造的に排除できる
+        const ct = coverTransform();
+        let horizonRow = 0;
+        for (let y = 0; y < H; y++) {
+            const screenY = y * (vw / W) * ct.scale + ct.oy;
+            if (screenToPlane(innerWidth / 2, screenY)) { horizonRow = y; break; }
+            horizonRow = y + 1;
+        }
+
         // マルチソースBFS: いずれかのクラスタに近い画素を連結領域として成長。
-        // visited = 訪問済み (再enqueue防止)、mask = 受理した水面画素
+        // 受理画素には最寄りクラスタのラベルを付け、あとでクラスタ単位に選別する
+        // (岸や手すりに落ちたシードのクラスタは、ここで丸ごと捨てられる)
         const thr = Number(toleranceInput.value) * 3;
         const visited = new Uint8Array(W * H);
-        const mask = new Uint8Array(W * H);
+        const labels = new Int8Array(W * H).fill(-1);
         const queue = new Int32Array(W * H);
-        let head = 0, tail = 0, accepted = 0;
+        let head = 0, tail = 0;
         for (const cl of clusters) {
             for (const si of cl.seeds) {
                 if (!visited[si]) { visited[si] = 1; queue[tail++] = si; }
             }
         }
 
+        const counts = new Array(clusters.length).fill(0);
+        const gradSums = new Array(clusters.length).fill(0);
+        const touchesBottom = new Array(clusters.length).fill(false);
+        const bottomBand = Math.floor(H * 0.85);
+
         while (head < tail) {
             const i = queue[head++];
+            if (((i / W) | 0) < horizonRow) continue;   // 地平線より上は水ではない
             const f = features(i * 4);
-            let best = null, bestD = Infinity;
-            for (const cl of clusters) {
-                const d = dist(f, cl.f);
-                if (d < bestD) { bestD = d; best = cl; }
+            let best = -1, bestD = Infinity;
+            for (let k = 0; k < clusters.length; k++) {
+                const d = dist(f, clusters[k].f);
+                if (d < bestD) { bestD = d; best = k; }
             }
             if (bestD > thr) continue;
-            mask[i] = 1;
-            accepted++;
-            // 受理画素で最寄りクラスタの中心を微更新 (緩やかな色変化に追従)
-            best.f[0] += (f[0] - best.f[0]) * 0.002;
-            best.f[1] += (f[1] - best.f[1]) * 0.002;
-            best.f[2] += (f[2] - best.f[2]) * 0.002;
+            labels[i] = best;
+            counts[best]++;
+            gradSums[best] += grad[i];
+            const y = (i / W) | 0;
+            if (y >= bottomBand) touchesBottom[best] = true;
+            // 受理画素で最寄りクラスタの中心を微更新 (緩やかな色変化に追従)。
+            // ただし初期中心から離れすぎた画素では更新しない —
+            // 受理画素数が多いと平均が岸側の色まで歩いてしまうため
+            const cl2 = clusters[best];
+            if (dist(f, cl2.f0) < 25) {
+                cl2.f[0] += (f[0] - cl2.f[0]) * 0.002;
+                cl2.f[1] += (f[1] - cl2.f[1]) * 0.002;
+                cl2.f[2] += (f[2] - cl2.f[2]) * 0.002;
+            }
 
-            const x = i % W, y = (i / W) | 0;
+            const x = i % W;
             if (x > 0 && !visited[i - 1]) { visited[i - 1] = 1; queue[tail++] = i - 1; }
             if (x < W - 1 && !visited[i + 1]) { visited[i + 1] = 1; queue[tail++] = i + 1; }
             if (y > 0 && !visited[i - W]) { visited[i - W] = 1; queue[tail++] = i - W; }
             if (y < H - 1 && !visited[i + W]) { visited[i + W] = 1; queue[tail++] = i + W; }
         }
 
-        const ratio = accepted / (W * H);
-        if (ratio > CONFIG.MAX_REGION_RATIO || ratio < CONFIG.MIN_REGION_RATIO) {
+        // クラスタ単位の選別。サイズでは判定しない (水面だけを写せば正当に
+        // 100%になる)。条件は:
+        //   1. 画面下端に接している (タップ指定時は免除)
+        //   2. テクスチャが滑らか — 最も滑らかな有効クラスタの2.5倍以内
+        //      (水面同士の明暗クラスタは通り、植生・樹木・護岸は落ちる)
+        const total = W * (H - horizonRow) || 1;
+        const textures = clusters.map((cl, k) =>
+            counts[k] > 0 ? gradSums[k] / counts[k] : Infinity);
+        let minTex = Infinity;
+        for (let k = 0; k < clusters.length; k++) {
+            if (counts[k] >= total * 0.01 && (seed.tapped || touchesBottom[k])) {
+                minTex = Math.min(minTex, textures[k]);
+            }
+        }
+        const texLimit = Math.max(minTex * 2.5, 15);
+        const keep = clusters.map((cl, k) =>
+            counts[k] >= total * 0.01 &&
+            (seed.tapped || touchesBottom[k]) &&
+            textures[k] <= texLimit
+        );
+        const mask = new Uint8Array(W * H);
+        let accepted = 0;
+        for (let i = 0; i < W * H; i++) {
+            if (labels[i] >= 0 && keep[labels[i]]) { mask[i] = 1; accepted++; }
+        }
+
+        const ratio = accepted / total;
+        debug = {
+            clusters: clusters.map((cl, k) => ({
+                f: cl.f.map(v => +v.toFixed(1)),
+                count: counts[k],
+                share: +(counts[k] / total).toFixed(3),
+                texture: +textures[k].toFixed(1),
+                touchesBottom: touchesBottom[k],
+                kept: keep[k],
+            })),
+            ratio: +ratio.toFixed(3),
+            texLimit: +texLimit.toFixed(1),
+            horizonRow,
+            reason: null,
+        };
+        if (ratio < CONFIG.MIN_REGION_RATIO) {
+            debug.reason = 'union too small';
             boundary = null; maskImage = null; waterPixels = [];
             return false;
         }
@@ -245,6 +329,7 @@ window.Waterline = (function () {
             }
         }
         if (cols < W * CONFIG.MIN_COL_RATIO) {
+            debug.reason = 'too few columns';
             boundary = null; maskImage = null; waterPixels = [];
             return false;
         }
@@ -453,5 +538,6 @@ window.Waterline = (function () {
         get boundary() { return boundary; },
         get particles() { return particles; },
         get waterPixels() { return waterPixels; },
+        get debug() { return debug; },
     };
 })();
