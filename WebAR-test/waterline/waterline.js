@@ -4,34 +4,38 @@
 // index.html (ライブカメラ) と test.html (静止画テストハーネス) の両方から
 // 使う。映像ソースは video でも canvas でもよく、寸法はアクセサで受け取る。
 //
-//   画像処理 (2D): シード点からの領域成長で「どの画素が水か」のマスクを作る
-//   幾何 (3D):     「水面は水平な平面で、カメラはその高さh(仮定)にある」
-//                  という拘束のもと、水画素のレイと平面の交点を計算して
-//                  スクリーン座標を3次元座標に逆投影する
-//   演出:          粒子は水面上の3次元点から生成し、ワールド座標で上昇。
-//                  毎フレーム、現在のカメラ姿勢で投影し直す
+// 設計 (v6):
+//   認識 (2D): シード群からの領域成長で「水面ポリゴン」のマスクを作り、
+//              その輪郭を毎フレーム描画し続ける (ワイヤーフレーム式 —
+//              毎フレーム画像から取り直すので対象からずれない)。
+//              かつての「水際ラインより下は全部水」という仮定は廃止。
+//              運河の楔形の水面や、手前に土手がある川では成り立たないため
+//   幾何 (3D): 「水面は水平な平面で、カメラは高さh(仮定)にある」の拘束で
+//              マスク内の画素を平面上の3次元座標に逆投影する
+//   演出:      泡は水面ポリゴン内の3次元点から生成し、ワールドで上昇。
+//              泡の真下の「足元」が水面ポリゴン内にあるか + 水面からの
+//              高さ上限で可視判定する (擬似オクルージョン)。
+//              岸や船の上に泡が出る「ハリボテ感」をここで抑える
 // =====================================================================
 window.Waterline = (function () {
     const CONFIG = {
         PROC_WIDTH: 120,        // 画像処理の解像度 (幅)
         DETECT_FPS: 8,
-        SEED_DEFAULT: { x: 0.5, y: 0.85 },  // ソース座標比のシード初期値
-        MAX_REGION_RATIO: 0.75, // 領域がこれ以上に広がったら誤認識として棄却
-        MIN_REGION_RATIO: 0.02,
-        MIN_COL_RATIO: 0.25,
-        EMA: 0.35,              // 水際ラインの時間平滑
+        MIN_REGION_RATIO: 0.02, // 地平線より下に占める最小面積比
         FOV_DEG: 60,            // 縦FOVの仮定
-        MAX_DIST: 60,           // これより遠い交点は棄却 [m]
+        MAX_DIST: 60,           // これより遠い平面交点は棄却 [m]
         SPAWN_PER_FRAME: 4,
         MAX_PARTICLES: 300,
-        RISE_SPEED: [0.15, 0.5],  // 上昇速度 [m/s]
+        RISE_SPEED: [0.1, 0.35],  // 泡の上昇速度 [m/s]
+        RISE_LIMIT: 0.8,          // 水面からこの高さで消える [m]
         LIFE: [1.5, 3.5],         // 寿命 [s]
-        SIZE: [0.02, 0.05],       // 粒子の実サイズ [m]
+        SIZE: [0.02, 0.05],       // 泡の実サイズ [m]
+        COMPANION_DIST: 25,     // 最良クラスタとこの色距離以内の同輩も採用
     };
 
     // init() で受け取るもの
-    let source = null;          // 映像ソース要素 (video または canvas)
-    let getW = () => 0;         // ソースの幅/高さ
+    let source = null;
+    let getW = () => 0;
     let getH = () => 0;
     let layer = null, ctx = null;
     let toleranceInput = null, camHeightInput = null;
@@ -42,15 +46,16 @@ window.Waterline = (function () {
     const maskCanvas = document.createElement('canvas');
     const maskCtx = maskCanvas.getContext('2d');
 
-    let seed = { ...CONFIG.SEED_DEFAULT };
-    let boundary = null;       // 水際ライン (画面座標の折れ線)
-    let maskImage = null;      // 水面マスク (proc解像度)
-    let waterPixels = [];      // 受理画素のインデックス
+    let seed = null;           // タップ指定時のみ {x, y} (ソース座標比)
+    let maskGrid = null;       // 水面マスク (proc解像度, Uint8Array)
+    let contour = null;        // マスク輪郭画素のインデックス配列
+    let maskImage = null;      // 表示用の着色マスク
+    let waterPixels = [];      // マスク画素のインデックス (泡のスポーン元)
     let procSize = null;
     let particles = [];
     let lastTime = null;
     let running = false;
-    let debug = {};   // 直近の検出の内部統計 (チューニング・実写デバッグ用)
+    let debug = {};            // 直近の検出の内部統計 (チューニング用)
 
     // ---------------------------------------------------------------
     // 姿勢: DeviceOrientation → クォータニオン (W3C仕様の Z-X'-Y'' 順)
@@ -136,8 +141,19 @@ window.Waterline = (function () {
         };
     }
 
+    // 画面座標が水面マスクの中か (泡の可視判定に使う)
+    function maskAtScreen(sx, sy) {
+        if (!maskGrid || !procSize) return false;
+        const { W, H } = procSize;
+        const { scale, ox, oy } = coverTransform();
+        const s = getW() / W;
+        const px = Math.floor((sx - ox) / scale / s);
+        const py = Math.floor((sy - oy) / scale / s);
+        return px >= 0 && px < W && py >= 0 && py < H && maskGrid[py * W + px] === 1;
+    }
+
     // ---------------------------------------------------------------
-    // 水面マスク: シード点からの領域成長 (2D)
+    // 水面認識: シード群からの領域成長 + クラスタ選別 + 輪郭抽出
     // ---------------------------------------------------------------
     function detectWater() {
         const vw = getW(), vh = getH();
@@ -152,8 +168,7 @@ window.Waterline = (function () {
 
         // 色の比較は「輝度に鈍く、色味に敏感」にする。
         // 水面は空の反射 (明) と影・藻 (暗) で輝度が大きく割れる一方、
-        // 色味は保たれやすい (実写の池・運河の写真での観察に基づく)。
-        // 特徴量: [Y(輝度), Cr(R-Y), Cb(B-Y)]、距離 = 0.25|dY| + 1.6(|dCr|+|dCb|)
+        // 色味は保たれやすい。特徴量: [Y, Cr(R-Y), Cb(B-Y)]
         function features(o) {
             const r = src[o], g = src[o + 1], b = src[o + 2];
             const y = 0.299 * r + 0.587 * g + 0.114 * b;
@@ -164,19 +179,44 @@ window.Waterline = (function () {
                  + 1.6 * (Math.abs(f[1] - c[1]) + Math.abs(f[2] - c[2]));
         }
 
-        // シード: ユーザーがタップした場合はその1点、既定では画面下部に
-        // 複数ばら撒く (最下部が手すり・船べり等でも他のシードが生き残る)
-        const seedPoints = seed.tapped
-            ? [seed]
-            : [0.15, 0.3, 0.5, 0.7, 0.85].flatMap(x => [
-                  { x, y: 0.9 }, { x, y: 0.75 },
-              ]);
+        // テクスチャ判定用の輝度勾配。水面は滑らか、植生・護岸・船は高テクスチャ
+        const luma = new Float32Array(W * H);
+        for (let i = 0; i < W * H; i++) {
+            const o = i * 4;
+            luma[i] = 0.299 * src[o] + 0.587 * src[o + 1] + 0.114 * src[o + 2];
+        }
+        const grad = new Float32Array(W * H);
+        for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+                const i = y * W + x;
+                grad[i] = Math.abs(luma[i + 1] - luma[i - 1])
+                        + Math.abs(luma[i + W] - luma[i - W]);
+            }
+        }
 
-        // 各シードの3x3平均をクラスタ中心にする (近すぎるクラスタは統合)
+        // 幾何制約: 地平線より上は水ではありえない。
+        // 現在のカメラ姿勢で水平面が見える最上端の行を求め、BFSをそこに制限する
+        const ct = coverTransform();
+        let horizonRow = 0;
+        for (let y = 0; y < H; y++) {
+            const screenY = y * (vw / W) * ct.scale + ct.oy;
+            if (screenToPlane(innerWidth / 2, screenY)) { horizonRow = y; break; }
+            horizonRow = y + 1;
+        }
+
+        // シード: タップ指定時はその1点。既定では画面の中〜下部に格子状に
+        // ばら撒く (手前が土手で水面が画面中段にある構図にも届くように)
+        const seedPoints = seed
+            ? [seed]
+            : [0.15, 0.3, 0.5, 0.7, 0.85].flatMap(x =>
+                  [0.5, 0.65, 0.8, 0.9].map(y => ({ x, y })));
+
+        // 各シードの3x3平均をクラスタ中心にする (近い色のクラスタは統合)
         const clusters = [];
         for (const sp of seedPoints) {
             const sx = Math.min(W - 1, Math.max(0, Math.round(sp.x * W)));
             const sy = Math.min(H - 1, Math.max(0, Math.round(sp.y * H)));
+            if (sy < horizonRow) continue;
             let f = [0, 0, 0], c = 0;
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
@@ -194,37 +234,13 @@ window.Waterline = (function () {
                 clusters.push({ f, f0: f.slice(), seeds: [sy * W + sx] });
             }
         }
-
-        // テクスチャ判定用の輝度勾配マップ。水面は滑らか (低勾配)、
-        // 植生・樹木・護岸は高テクスチャ (高勾配) という違いをクラスタ選別に使う
-        const luma = new Float32Array(W * H);
-        for (let i = 0; i < W * H; i++) {
-            const o = i * 4;
-            luma[i] = 0.299 * src[o] + 0.587 * src[o + 1] + 0.114 * src[o + 2];
-        }
-        const grad = new Float32Array(W * H);
-        for (let y = 1; y < H - 1; y++) {
-            for (let x = 1; x < W - 1; x++) {
-                const i = y * W + x;
-                grad[i] = Math.abs(luma[i + 1] - luma[i - 1])
-                        + Math.abs(luma[i + W] - luma[i - W]);
-            }
+        if (clusters.length === 0) {
+            debug = { reason: 'no seeds below horizon' };
+            maskGrid = null; contour = null; maskImage = null; waterPixels = [];
+            return false;
         }
 
-        // 幾何制約: 水面は水平な平面なので、地平線より上の画素は水ではありえない。
-        // 現在のカメラ姿勢で「水平面と交わる最上端の行」を求め、BFSをそこに制限する。
-        // 空 (および空を反射した水面と同色の領域が空へ繋がる問題) を構造的に排除できる
-        const ct = coverTransform();
-        let horizonRow = 0;
-        for (let y = 0; y < H; y++) {
-            const screenY = y * (vw / W) * ct.scale + ct.oy;
-            if (screenToPlane(innerWidth / 2, screenY)) { horizonRow = y; break; }
-            horizonRow = y + 1;
-        }
-
-        // マルチソースBFS: いずれかのクラスタに近い画素を連結領域として成長。
-        // 受理画素には最寄りクラスタのラベルを付け、あとでクラスタ単位に選別する
-        // (岸や手すりに落ちたシードのクラスタは、ここで丸ごと捨てられる)
+        // マルチソースBFS: 受理画素に最寄りクラスタのラベルを付ける
         const thr = Number(toleranceInput.value) * 3;
         const visited = new Uint8Array(W * H);
         const labels = new Int8Array(W * H).fill(-1);
@@ -238,8 +254,8 @@ window.Waterline = (function () {
 
         const counts = new Array(clusters.length).fill(0);
         const gradSums = new Array(clusters.length).fill(0);
-        const touchesBottom = new Array(clusters.length).fill(false);
-        const bottomBand = Math.floor(H * 0.85);
+        const colMin = new Array(clusters.length).fill(Infinity);
+        const colMax = new Array(clusters.length).fill(-1);
 
         while (head < tail) {
             const i = queue[head++];
@@ -254,11 +270,11 @@ window.Waterline = (function () {
             labels[i] = best;
             counts[best]++;
             gradSums[best] += grad[i];
-            const y = (i / W) | 0;
-            if (y >= bottomBand) touchesBottom[best] = true;
-            // 受理画素で最寄りクラスタの中心を微更新 (緩やかな色変化に追従)。
-            // ただし初期中心から離れすぎた画素では更新しない —
-            // 受理画素数が多いと平均が岸側の色まで歩いてしまうため
+            const x = i % W, y = (i / W) | 0;
+            if (x < colMin[best]) colMin[best] = x;
+            if (x > colMax[best]) colMax[best] = x;
+            // 受理画素で最寄りクラスタの中心を微更新。初期中心から離れた画素では
+            // 更新しない (平均が岸の色まで歩いてしまう事故の防止)
             const cl2 = clusters[best];
             if (dist(f, cl2.f0) < 25) {
                 cl2.f[0] += (f[0] - cl2.f[0]) * 0.002;
@@ -266,125 +282,79 @@ window.Waterline = (function () {
                 cl2.f[2] += (f[2] - cl2.f[2]) * 0.002;
             }
 
-            const x = i % W;
             if (x > 0 && !visited[i - 1]) { visited[i - 1] = 1; queue[tail++] = i - 1; }
             if (x < W - 1 && !visited[i + 1]) { visited[i + 1] = 1; queue[tail++] = i + 1; }
             if (y > 0 && !visited[i - W]) { visited[i - W] = 1; queue[tail++] = i - W; }
             if (y < H - 1 && !visited[i + W]) { visited[i + W] = 1; queue[tail++] = i + W; }
         }
 
-        // クラスタ単位の選別。サイズでは判定しない (水面だけを写せば正当に
-        // 100%になる)。条件は:
-        //   1. 画面下端に接している (タップ指定時は免除)
-        //   2. テクスチャが滑らか — 最も滑らかな有効クラスタの2.5倍以内
-        //      (水面同士の明暗クラスタは通り、植生・樹木・護岸は落ちる)
+        // クラスタ選別: 「広くて滑らか」を水面らしさとして最良クラスタを選び、
+        // それと色の近い同輩 (明暗で割れた同じ水面) も併せて採用する。
+        // サイズや接地では判定しない — 楔形の運河や手前が土手の川があるため
         const total = W * (H - horizonRow) || 1;
         const textures = clusters.map((cl, k) =>
             counts[k] > 0 ? gradSums[k] / counts[k] : Infinity);
-        let minTex = Infinity;
+        const scores = clusters.map((cl, k) => {
+            if (counts[k] < total * 0.01) return -1;
+            const span = colMax[k] - colMin[k] + 1;
+            return span * counts[k] / (textures[k] + 3);
+        });
+        let bestK = -1;
         for (let k = 0; k < clusters.length; k++) {
-            if (counts[k] >= total * 0.01 && (seed.tapped || touchesBottom[k])) {
-                minTex = Math.min(minTex, textures[k]);
-            }
+            if (scores[k] > (bestK < 0 ? -1 : scores[bestK])) bestK = k;
         }
-        const texLimit = Math.max(minTex * 2.5, 15);
+        if (bestK < 0) {
+            debug = { reason: 'no viable cluster' };
+            maskGrid = null; contour = null; maskImage = null; waterPixels = [];
+            return false;
+        }
         const keep = clusters.map((cl, k) =>
-            counts[k] >= total * 0.01 &&
-            (seed.tapped || touchesBottom[k]) &&
-            textures[k] <= texLimit
-        );
+            scores[k] > 0 &&
+            (k === bestK || dist(cl.f, clusters[bestK].f) < CONFIG.COMPANION_DIST));
+
+        // マスク・輪郭・スポーン画素・表示用画像を作る
         const mask = new Uint8Array(W * H);
         let accepted = 0;
         for (let i = 0; i < W * H; i++) {
             if (labels[i] >= 0 && keep[labels[i]]) { mask[i] = 1; accepted++; }
         }
 
-        const ratio = accepted / total;
         debug = {
             clusters: clusters.map((cl, k) => ({
                 f: cl.f.map(v => +v.toFixed(1)),
                 count: counts[k],
-                share: +(counts[k] / total).toFixed(3),
                 texture: +textures[k].toFixed(1),
-                touchesBottom: touchesBottom[k],
+                score: +scores[k].toFixed(0),
                 kept: keep[k],
             })),
-            ratio: +ratio.toFixed(3),
-            texLimit: +texLimit.toFixed(1),
             horizonRow,
+            ratio: +(accepted / total).toFixed(3),
             reason: null,
         };
-        if (ratio < CONFIG.MIN_REGION_RATIO) {
-            debug.reason = 'union too small';
-            boundary = null; maskImage = null; waterPixels = [];
+        if (accepted < total * CONFIG.MIN_REGION_RATIO) {
+            debug.reason = 'region too small';
+            maskGrid = null; contour = null; maskImage = null; waterPixels = [];
             return false;
         }
 
-        // 列ごとの最上端 → 水際ライン
-        const tops = new Float32Array(W).fill(-1);
-        let cols = 0;
-        for (let x = 0; x < W; x++) {
-            for (let y = 0; y < H; y++) {
-                if (mask[y * W + x]) { tops[x] = y; cols++; break; }
-            }
-        }
-        if (cols < W * CONFIG.MIN_COL_RATIO) {
-            debug.reason = 'too few columns';
-            boundary = null; maskImage = null; waterPixels = [];
-            return false;
-        }
-
-        // 水がない列は近傍から補間し、メディアン平滑 (幅5)
-        let prev = -1;
-        for (let x = 0; x < W; x++) {
-            if (tops[x] >= 0) prev = tops[x];
-            else if (prev >= 0) tops[x] = prev;
-        }
-        for (let x = W - 1, next = -1; x >= 0; x--) {
-            if (tops[x] >= 0) next = tops[x];
-            else if (next >= 0) tops[x] = next;
-        }
-        const smoothed = new Float32Array(W);
-        for (let x = 0; x < W; x++) {
-            const win = [];
-            for (let k = -2; k <= 2; k++) {
-                win.push(tops[Math.min(W - 1, Math.max(0, x + k))]);
-            }
-            win.sort((a, b) => a - b);
-            smoothed[x] = win[2];
-        }
-
-        // 水際より下は水として穴を埋める。表示用マスクとスポーン画素リストを更新
-        const img = maskCtx.createImageData(W, H);
+        const newContour = [];
         waterPixels = [];
-        for (let x = 0; x < W; x++) {
-            const top = Math.round(smoothed[x]);
-            for (let y = top; y < H; y++) {
-                const o = (y * W + x) * 4;
-                img.data[o] = 120;
-                img.data[o + 1] = 220;
-                img.data[o + 2] = 255;
-                img.data[o + 3] = 28;
-                waterPixels.push(y * W + x);
+        const img = maskCtx.createImageData(W, H);
+        for (let i = 0; i < W * H; i++) {
+            if (!mask[i]) continue;
+            waterPixels.push(i);
+            const o = i * 4;
+            img.data[o] = 120; img.data[o + 1] = 220; img.data[o + 2] = 255;
+            img.data[o + 3] = 26;
+            const x = i % W, y = (i / W) | 0;
+            if (x === 0 || x === W - 1 || y === 0 || y === H - 1 ||
+                !mask[i - 1] || !mask[i + 1] || !mask[i - W] || !mask[i + W]) {
+                newContour.push(i);
             }
         }
+        maskGrid = mask;
+        contour = newContour;
         maskImage = img;
-
-        // 水際ライン: ソース座標 → 画面座標
-        const { scale, ox, oy } = coverTransform();
-        const s = vw / W;
-        const pts = [];
-        for (let x = 0; x < W; x += 2) {
-            pts.push({ x: x * s * scale + ox, y: smoothed[x] * s * scale + oy });
-        }
-        if (boundary && boundary.length === pts.length) {
-            for (let i = 0; i < pts.length; i++) {
-                boundary[i].y += (pts[i].y - boundary[i].y) * CONFIG.EMA;
-                boundary[i].x = pts[i].x;
-            }
-        } else {
-            boundary = pts;
-        }
         return true;
     }
 
@@ -399,7 +369,7 @@ window.Waterline = (function () {
     }
 
     // ---------------------------------------------------------------
-    // 粒子 (ワールド座標)
+    // 泡 (ワールド座標)
     // ---------------------------------------------------------------
     function spawnParticles() {
         if (waterPixels.length === 0 || !procSize) return;
@@ -436,7 +406,7 @@ window.Waterline = (function () {
         ctx.save();
         ctx.scale(dpr, dpr);
 
-        // 認識した水面をうっすら着色
+        // 認識した水面ポリゴンをうっすら着色
         if (maskImage && procSize) {
             const { W, H } = procSize;
             maskCanvas.width = W;
@@ -449,36 +419,53 @@ window.Waterline = (function () {
 
         ctx.globalCompositeOperation = 'lighter';
 
-        // 水際ライン
-        if (boundary) {
-            ctx.beginPath();
-            ctx.moveTo(boundary[0].x, boundary[0].y);
-            for (const p of boundary) ctx.lineTo(p.x, p.y);
-            ctx.strokeStyle = 'rgba(140, 235, 255, 0.4)';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+        // 水面ポリゴンの輪郭を毎フレーム描く (ワイヤーフレーム式)
+        if (contour && procSize) {
+            const { W } = procSize;
+            const { scale, ox, oy } = coverTransform();
+            const s = getW() / W;
+            const r = Math.max(1.2, s * scale * 0.55);
+            ctx.fillStyle = 'rgba(140, 235, 255, 0.5)';
+            for (const i of contour) {
+                const x = (i % W + 0.5) * s * scale + ox;
+                const y = (((i / W) | 0) + 0.5) * s * scale + oy;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
 
-        // 粒子: ワールドで上昇 → 現在のカメラ姿勢で投影
+        // 泡: ワールドで上昇 → 現在の姿勢で投影。
+        // 可視条件 = 足元 (真下の水面上の点) が水面ポリゴン内にあること。
+        // 岸・船・空の上に泡が出るのを防ぎ、水面の形に沿った奥行きが出る
         spawnParticles();
         const f = focalPx();
+        const camH = Number(camHeightInput.value);
         for (let i = particles.length - 1; i >= 0; i--) {
             const p = particles[i];
             p.age += dt;
-            if (p.age > p.life) { particles.splice(i, 1); continue; }
+            const height = p.pos[1] + camH;   // 水面からの高さ
+            if (p.age > p.life || height > CONFIG.RISE_LIMIT) {
+                particles.splice(i, 1);
+                continue;
+            }
             p.pos[1] += p.vy * dt;
             p.pos[0] += Math.sin(p.age * 3 + p.phase) * p.sway * dt;
 
             const sp = worldToScreen(p.pos);
             if (!sp) continue;
+            const foot = worldToScreen([p.pos[0], -camH, p.pos[2]]);
+            if (!foot || !maskAtScreen(foot.x, foot.y)) continue;
+
             const r = p.size * f / sp.dist;
             if (r < 0.3) continue;
 
             const t = p.age / p.life;
-            const alpha = t < 0.2 ? t / 0.2 : 1 - (t - 0.2) / 0.8;
+            let alpha = t < 0.2 ? t / 0.2 : 1 - (t - 0.2) / 0.8;
+            alpha *= 1 - Math.max(0, height / CONFIG.RISE_LIMIT - 0.6) / 0.4;  // 上限付近でフェード
             ctx.beginPath();
             ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(180, 240, 255, ${alpha * 0.8})`;
+            ctx.fillStyle = `rgba(180, 240, 255, ${Math.max(0, alpha) * 0.8})`;
             ctx.fill();
         }
 
@@ -500,8 +487,7 @@ window.Waterline = (function () {
         const x = (sx - ox) / scale / getW();
         const y = (sy - oy) / scale / getH();
         if (x < 0 || x > 1 || y < 0 || y > 1) return false;
-        seed = { x, y, tapped: true };
-        boundary = null;
+        seed = { x, y };
         particles = [];
         return true;
     }
@@ -524,8 +510,9 @@ window.Waterline = (function () {
     }
 
     function reset() {
-        seed = { ...CONFIG.SEED_DEFAULT };
-        boundary = null;
+        seed = null;
+        maskGrid = null;
+        contour = null;
         maskImage = null;
         waterPixels = [];
         particles = [];
@@ -535,7 +522,7 @@ window.Waterline = (function () {
         CONFIG, init, reset, resize,
         setOrientation, setSeedFromScreen,
         // テスト・デバッグ用の内部状態アクセス
-        get boundary() { return boundary; },
+        get contour() { return contour; },
         get particles() { return particles; },
         get waterPixels() { return waterPixels; },
         get debug() { return debug; },
