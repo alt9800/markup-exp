@@ -91,6 +91,29 @@
         }
         #controls.hidden { display: none; }
         #controls input[type="range"] { width: 150px; }
+        #controls button {
+            grid-column: 1 / -1;
+            padding: 8px;
+            font-size: 13px;
+            color: #fff;
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.4);
+            border-radius: 6px;
+        }
+
+        #panel-toggle {
+            position: fixed;
+            bottom: 20px;
+            right: 16px;
+            z-index: 6;
+            padding: 8px 14px;
+            font-size: 13px;
+            color: #fff;
+            background: rgba(0,0,0,0.55);
+            border: 1px solid rgba(255,255,255,0.4);
+            border-radius: 8px;
+        }
+        #panel-toggle.hidden { display: none; }
     </style>
 </head>
 <body>
@@ -108,11 +131,13 @@
     </div>
 
     <div id="hud" class="hidden"><span id="hud-text"></span></div>
+    <button id="panel-toggle" class="hidden">調整</button>
     <div id="controls" class="hidden">
         <label for="tolerance">色の許容差</label>
         <input type="range" id="tolerance" min="5" max="40" value="12">
         <label for="cam-height">カメラの高さ</label>
         <input type="range" id="cam-height" min="0.8" max="4.0" step="0.1" value="1.5">
+        <button id="style-toggle">表示を矩形ドットにする</button>
     </div>
 
     <script src="waterline.js"></script>
@@ -142,7 +167,7 @@
             return;
         }
         document.getElementById('start-overlay').classList.add('hidden');
-        document.getElementById('controls').classList.remove('hidden');
+        document.getElementById('panel-toggle').classList.remove('hidden');
 
         Waterline.init({
             source: video,
@@ -163,6 +188,16 @@
 
     document.getElementById('start-button').addEventListener('click', start);
     document.getElementById('controls').addEventListener('click', e => e.stopPropagation());
+    document.getElementById('panel-toggle').addEventListener('click', e => {
+        e.stopPropagation();
+        document.getElementById('controls').classList.toggle('hidden');
+    });
+    document.getElementById('style-toggle').addEventListener('click', e => {
+        e.stopPropagation();
+        const pixel = e.target.textContent.includes('矩形');
+        Waterline.setStyle(pixel ? 'pixel' : 'round');
+        e.target.textContent = pixel ? '表示を丸にする' : '表示を矩形ドットにする';
+    });
     // 開始画面のクリックがwindowのタップ処理 (シード指定) に届かないようにする
     document.getElementById('start-overlay').addEventListener('click', e => e.stopPropagation());
     </script>

@@ -55,6 +55,7 @@ window.Waterline = (function () {
     let particles = [];
     let lastTime = null;
     let running = false;
+    let style = 'round';       // 表示スタイル: 'round' (丸) | 'pixel' (矩形ドット)
     let debug = {};            // 直近の検出の内部統計 (チューニング用)
 
     // ---------------------------------------------------------------
@@ -294,10 +295,14 @@ window.Waterline = (function () {
         const total = W * (H - horizonRow) || 1;
         const textures = clusters.map((cl, k) =>
             counts[k] > 0 ? gradSums[k] / counts[k] : Infinity);
+        // 水面らしさスコア: 広さ × 滑らかさに加えて、色味の事前知識を使う。
+        // 水は緑〜青に寄りがち (Crが負 or Cbが正)、アスファルト・コンクリートは
+        // 無彩色。これがないと「滑らかで広い」アスファルトが水に勝ってしまう
         const scores = clusters.map((cl, k) => {
             if (counts[k] < total * 0.01) return -1;
             const span = colMax[k] - colMin[k] + 1;
-            return span * counts[k] / (textures[k] + 3);
+            const chroma = Math.max(0, Math.max(-cl.f[1], cl.f[2]));
+            return span * counts[k] / (textures[k] + 3) * (1 + chroma / 8);
         });
         let bestK = -1;
         for (let k = 0; k < clusters.length; k++) {
@@ -337,22 +342,34 @@ window.Waterline = (function () {
             return false;
         }
 
+        // 3x3多数決でマスクの斑点ノイズを除去する (輪郭の点々の暴れ対策)
+        const clean = new Uint8Array(W * H);
+        for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+                const i = y * W + x;
+                const n = mask[i - W - 1] + mask[i - W] + mask[i - W + 1]
+                        + mask[i - 1] + mask[i] + mask[i + 1]
+                        + mask[i + W - 1] + mask[i + W] + mask[i + W + 1];
+                clean[i] = n >= 5 ? 1 : 0;
+            }
+        }
+
         const newContour = [];
         waterPixels = [];
         const img = maskCtx.createImageData(W, H);
         for (let i = 0; i < W * H; i++) {
-            if (!mask[i]) continue;
+            if (!clean[i]) continue;
             waterPixels.push(i);
             const o = i * 4;
             img.data[o] = 120; img.data[o + 1] = 220; img.data[o + 2] = 255;
             img.data[o + 3] = 26;
             const x = i % W, y = (i / W) | 0;
             if (x === 0 || x === W - 1 || y === 0 || y === H - 1 ||
-                !mask[i - 1] || !mask[i + 1] || !mask[i - W] || !mask[i + W]) {
+                !clean[i - 1] || !clean[i + 1] || !clean[i - W] || !clean[i + W]) {
                 newContour.push(i);
             }
         }
-        maskGrid = mask;
+        maskGrid = clean;
         contour = newContour;
         maskImage = img;
         return true;
@@ -424,14 +441,22 @@ window.Waterline = (function () {
             const { W } = procSize;
             const { scale, ox, oy } = coverTransform();
             const s = getW() / W;
-            const r = Math.max(1.2, s * scale * 0.55);
+            const cell = s * scale;
             ctx.fillStyle = 'rgba(140, 235, 255, 0.5)';
-            for (const i of contour) {
-                const x = (i % W + 0.5) * s * scale + ox;
-                const y = (((i / W) | 0) + 0.5) * s * scale + oy;
-                ctx.beginPath();
-                ctx.arc(x, y, r, 0, Math.PI * 2);
-                ctx.fill();
+            if (style === 'pixel') {
+                // 処理解像度のセルをそのまま塗る (矩形ドット)
+                for (const i of contour) {
+                    ctx.fillRect((i % W) * cell + ox, ((i / W) | 0) * cell + oy, cell, cell);
+                }
+            } else {
+                const r = Math.max(1.2, cell * 0.55);
+                for (const i of contour) {
+                    const x = (i % W + 0.5) * cell + ox;
+                    const y = (((i / W) | 0) + 0.5) * cell + oy;
+                    ctx.beginPath();
+                    ctx.arc(x, y, r, 0, Math.PI * 2);
+                    ctx.fill();
+                }
             }
         }
 
@@ -463,10 +488,15 @@ window.Waterline = (function () {
             const t = p.age / p.life;
             let alpha = t < 0.2 ? t / 0.2 : 1 - (t - 0.2) / 0.8;
             alpha *= 1 - Math.max(0, height / CONFIG.RISE_LIMIT - 0.6) / 0.4;  // 上限付近でフェード
-            ctx.beginPath();
-            ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(180, 240, 255, ${Math.max(0, alpha) * 0.8})`;
-            ctx.fill();
+            if (style === 'pixel') {
+                const side = Math.max(2, Math.round(r * 1.8));
+                ctx.fillRect(Math.round(sp.x - side / 2), Math.round(sp.y - side / 2), side, side);
+            } else {
+                ctx.beginPath();
+                ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
 
         ctx.restore();
@@ -518,9 +548,11 @@ window.Waterline = (function () {
         particles = [];
     }
 
+    function setStyle(s) { style = s; }
+
     return {
         CONFIG, init, reset, resize,
-        setOrientation, setSeedFromScreen,
+        setOrientation, setSeedFromScreen, setStyle,
         // テスト・デバッグ用の内部状態アクセス
         get contour() { return contour; },
         get particles() { return particles; },

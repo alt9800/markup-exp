@@ -104,6 +104,20 @@
             border: 1px solid rgba(255,255,255,0.4);
             border-radius: 6px;
         }
+
+        #panel-toggle {
+            position: fixed;
+            bottom: 20px;
+            right: 16px;
+            z-index: 6;
+            padding: 8px 14px;
+            font-size: 13px;
+            color: #fff;
+            background: rgba(0,0,0,0.55);
+            border: 1px solid rgba(255,255,255,0.4);
+            border-radius: 8px;
+        }
+        #panel-toggle.hidden { display: none; }
     </style>
 </head>
 <body>
@@ -124,6 +138,7 @@
     </div>
 
     <div id="hud" class="hidden"><span id="hud-text"></span></div>
+    <button id="panel-toggle" class="hidden">調整</button>
     <div id="controls" class="hidden">
         <label for="tolerance">色の許容差</label>
         <input type="range" id="tolerance" min="5" max="40" value="12">
@@ -134,6 +149,7 @@
         <label for="pitch">俯角</label>
         <input type="range" id="pitch" min="0" max="80" step="1" value="20">
         <output id="pitch-out">20°</output>
+        <button id="style-toggle">表示を矩形ドットにする</button>
         <button id="change-photo">別の写真にする</button>
     </div>
 
@@ -161,7 +177,7 @@
         photoCtx.drawImage(imageSource, 0, 0, w, h);
 
         picker.classList.add('hidden');
-        document.getElementById('controls').classList.remove('hidden');
+        document.getElementById('panel-toggle').classList.remove('hidden');
         applyPitch();
 
         if (!started) {
@@ -233,6 +249,16 @@
         picker.classList.remove('hidden');
     });
     document.getElementById('controls').addEventListener('click', e => e.stopPropagation());
+    document.getElementById('panel-toggle').addEventListener('click', e => {
+        e.stopPropagation();
+        document.getElementById('controls').classList.toggle('hidden');
+    });
+    document.getElementById('style-toggle').addEventListener('click', e => {
+        e.stopPropagation();
+        const pixel = e.target.textContent.includes('矩形');
+        Waterline.setStyle(pixel ? 'pixel' : 'round');
+        e.target.textContent = pixel ? '表示を丸にする' : '表示を矩形ドットにする';
+    });
     // picker内のクリックがwindowのタップ処理 (シード指定) に届かないようにする
     picker.addEventListener('click', e => e.stopPropagation());
     document.getElementById('pitch').addEventListener('input', applyPitch);
