@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>簡易ジオリファレンサー</title>
+<link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+<style>
+  :root { color-scheme: light; --line:#c8ccd0; --bg:#f6f7f8; --fg:#1d2327; --blue:#1a5fb4; --red:#b3261e; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; flex-direction: column; font: 14px/1.5 system-ui, "Hiragino Sans", "Yu Gothic", sans-serif; color: var(--fg); background: #fff; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 8px 10px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .bar > * { margin: 0; }
+  button, input[type=text] { font: inherit; padding: 5px 10px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--fg); }
+  button { cursor: pointer; }
+  button:hover { background: #eceef0; }
+  input[type=text] { min-width: 0; width: 12em; }
+  label { display: inline-flex; align-items: center; gap: 6px; }
+  #status { flex: 1 1 14em; color: #444; min-width: 12em; }
+  .maps { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
+  .pane { position: relative; min-height: 0; border-right: 1px solid var(--line); }
+  .pane:last-child { border-right: 0; }
+  .map { position: absolute; inset: 0; }
+  .tag { position: absolute; z-index: 2; top: 8px; left: 8px; padding: 2px 8px; font-size: 12px; background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 3px; pointer-events: none; }
+  .pin { width: 22px; height: 22px; border-radius: 50%; background: var(--blue); color: #fff; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.45); font-size: 12px; font-weight: 600; text-align: center; line-height: 18px; cursor: grab; }
+  .pin.r { background: var(--red); }
+  .pin.pending { background: #fff; color: var(--blue); box-shadow: 0 0 0 2px var(--blue); }
+  .out { padding: 8px 10px; border-top: 1px solid var(--line); background: var(--bg); display: none; }
+  .out.on { display: block; }
+  textarea { width: 100%; height: 9em; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 6px; resize: vertical; }
+  @media (max-width: 800px) {
+    .maps { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    .pane { border-right: 0; border-bottom: 1px solid var(--line); }
+    .pane:last-child { border-bottom: 0; }
+    input[type=text] { width: 9em; }
+  }
+</style>
+</head>
+<body>
+<div class="bar">
+  <input type="file" id="file" accept="image/*">
+  <button id="undo">最後の対応点を削除</button>
+  <label>透明度 <input type="range" id="opacity" min="0" max="1" step="0.05" value="0.7"></label>
+  <input type="text" id="q" placeholder="地名で右側を移動">
+  <button id="go">検索</button>
+  <button id="exp">コード出力</button>
+  <button id="tif">GeoTIFF書き出し</button>
+  <div id="status">画像を選択してください。</div>
+</div>
+
+<div class="maps">
+  <div class="pane"><div class="tag">画像(左)</div><div id="left" class="map"></div></div>
+  <div class="pane"><div class="tag">地図(右)</div><div id="right" class="map"></div></div>
+</div>
+
+<div class="out" id="out">
+  <textarea id="code" readonly></textarea>
+  <button id="copy">コピー</button>
+</div>
+
+<script>
+const MC = maplibregl.MercatorCoordinate;
+const S0 = 0.45;                       // 左側の疑似座標の原点(メルカトル単位)
+let W = 0, H = 0, s = 0, fname = '', objUrl = null;
+let pairs = [], pending = null, ready = false;
+
+const $ = id => document.getElementById(id);
+const status = t => { $('status').textContent = t; };
+
+const left = new maplibregl.Map({
+  container: 'left', attributionControl: false,
+  style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#e6e8ea' } }] },
+  center: [0, 0], zoom: 1, doubleClickZoom: false
+});
+const right = new maplibregl.Map({
+  container: 'right',
+  style: { version: 8,
+    sources: { osm: { type: 'raster', tileSize: 256, maxzoom: 19, tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      attribution: '&copy; OpenStreetMap contributors' } },
+    layers: [{ id: 'osm', type: 'raster', source: 'osm' }] },
+  center: [135, 35.5], zoom: 5, doubleClickZoom: false
+});
+right.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
+const whenReady = (m, fn) => (m.isStyleLoaded() ? fn() : m.once('load', fn));
+const pix2ll = (x, y) => new MC(S0 + x * s, S0 + y * s, 0).toLngLat();
+const ll2pix = ll => { const m = MC.fromLngLat(ll); return [(m.x - S0) / s, (m.y - S0) / s]; };
+
+function pin(n, cls) {
+  const el = document.createElement('div');
+  el.className = 'pin ' + (cls || '');
+  el.textContent = n;
+  return el;
+}
+
+/* ---------- 画像の読み込み ---------- */
+$('file').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  clearAll();
+  fname = f.name;
+  if (objUrl) URL.revokeObjectURL(objUrl);
+  objUrl = URL.createObjectURL(f);
+  const im = new Image();
+  im.onload = () => {
+    srcImg = im;
+    W = im.naturalWidth; H = im.naturalHeight;
+    s = 0.05 / Math.max(W, H);
+    const corners = [[0, 0], [W, 0], [W, H], [0, H]].map(p => pix2ll(p[0], p[1]).toArray());
+    whenReady(left, () => {
+      if (left.getLayer('img')) left.removeLayer('img');
+      if (left.getSource('img')) left.removeSource('img');
+      left.addSource('img', { type: 'image', url: objUrl, coordinates: corners });
+      left.addLayer({ id: 'img', type: 'raster', source: 'img', paint: { 'raster-fade-duration': 0 } });
+      const a = pix2ll(0, H), b = pix2ll(W, 0);
+      left.fitBounds([a.toArray(), b.toArray()], { padding: 20, animate: false });
+      ready = true;
+      status('左の画像上で地点をクリックし、続けて右の地図で同じ地点をクリックしてください。3組以上で重ね合わせます。');
+    });
+  };
+  im.onerror = () => status('画像を読み込めませんでした。');
+  im.src = objUrl;
+});
+
+function clearAll() {
+  pairs.forEach(p => { p.mL.remove(); p.mR.remove(); });
+  pairs = [];
+  if (pending) { pending.marker.remove(); pending = null; }
+  if (right.getLayer('ov')) right.removeLayer('ov');
+  if (right.getSource('ov')) right.removeSource('ov');
+  ready = false;
+}
+
+/* ---------- 対応点の入力 ---------- */
+left.on('click', e => {
+  if (!ready) return;
+  if (pending) pending.marker.remove();
+  const marker = new maplibregl.Marker({ element: pin(pairs.length + 1, 'pending'), draggable: true })
+    .setLngLat(e.lngLat).addTo(left);
+  pending = { marker };
+  status('右の地図で対応する地点をクリックしてください。');
+});
+
+right.on('click', e => {
+  if (!ready) return;
+  if (!pending) { status('先に左の画像で地点を選んでください。'); return; }
+  const n = pairs.length + 1;
+  pending.marker.remove();
+  const mL = new maplibregl.Marker({ element: pin(n), draggable: true })
+    .setLngLat(pending.marker.getLngLat()).addTo(left);
+  const mR = new maplibregl.Marker({ element: pin(n, 'r'), draggable: true })
+    .setLngLat(e.lngLat).addTo(right);
+  mL.on('dragend', update);
+  mR.on('dragend', update);
+  pairs.push({ mL, mR });
+  pending = null;
+  update();
+});
+
+$('undo').addEventListener('click', () => {
+  if (pending) { pending.marker.remove(); pending = null; }
+  else if (pairs.length) { const p = pairs.pop(); p.mL.remove(); p.mR.remove(); }
+  update();
+});
+
+/* ---------- アフィン変換(最小二乗) ---------- */
+function solve3(M, b) {
+  const A = M.map((r, i) => [...r, b[i]]);
+  for (let c = 0; c < 3; c++) {
+    let p = c;
+    for (let r = c + 1; r < 3; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    if (Math.abs(A[p][c]) < 1e-12) return null;
+    [A[c], A[p]] = [A[p], A[c]];
+    for (let r = 0; r < 3; r++) {
+      if (r === c) continue;
+      const f = A[r][c] / A[c][c];
+      for (let k = c; k < 4; k++) A[r][k] -= f * A[c][k];
+    }
+  }
+  return [A[0][3] / A[0][0], A[1][3] / A[1][1], A[2][3] / A[2][2]];
+}
+
+function fitAffine(P) {
+  const x0 = P[0].x, y0 = P[0].y, X0 = P[0].X, Y0 = P[0].Y;
+  let sxx = 0, sxy = 0, sx = 0, syy = 0, sy = 0, n = P.length;
+  const bX = [0, 0, 0], bY = [0, 0, 0];
+  P.forEach(p => {
+    const x = p.x - x0, y = p.y - y0, X = p.X - X0, Y = p.Y - Y0;
+    sxx += x * x; sxy += x * y; sx += x; syy += y * y; sy += y;
+    bX[0] += x * X; bX[1] += y * X; bX[2] += X;
+    bY[0] += x * Y; bY[1] += y * Y; bY[2] += Y;
+  });
+  const M = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]];
+  const px = solve3(M, bX), py = solve3(M, bY);
+  if (!px || !py) return null;
+  // 原点補正を戻す
+  const f = (x, y, q, O, o0, o1) => q[0] * (x - o0) + q[1] * (y - o1) + q[2] + O;
+  return {
+    X: (x, y) => f(x, y, px, X0, x0, y0),
+    Y: (x, y) => f(x, y, py, Y0, x0, y0)
+  };
+}
+
+let lastCoords = null, lastT = null, srcImg = null;
+
+function update() {
+  if (!ready) return;
+  const n = pairs.length;
+  if (n < 3) {
+    if (right.getLayer('ov')) right.setLayoutProperty('ov', 'visibility', 'none');
+    lastCoords = null; lastT = null;
+    status(n + ' 組。重ね合わせには 3 組以上が必要です。');
+    return;
+  }
+  const P = pairs.map(p => {
+    const [x, y] = ll2pix(p.mL.getLngLat());
+    const m = MC.fromLngLat(p.mR.getLngLat());
+    return { x, y, X: m.x, Y: m.y };
+  });
+  const T = fitAffine(P);
+  if (!T) { status('対応点が一直線に近く、変換を計算できません。'); return; }
+
+  const coords = [[0, 0], [W, 0], [W, H], [0, H]]
+    .map(c => new MC(T.X(c[0], c[1]), T.Y(c[0], c[1]), 0).toLngLat().toArray());
+  lastCoords = coords;
+  lastT = { a: T.X(1, 0) - T.X(0, 0), b: T.X(0, 1) - T.X(0, 0), c: T.X(0, 0),
+            d: T.Y(1, 0) - T.Y(0, 0), e: T.Y(0, 1) - T.Y(0, 0), f: T.Y(0, 0) };
+
+  let msg = n + ' 組で変換しました。';
+  if (n >= 4) {
+    // 残差(メートル換算の概算)
+    let sum = 0;
+    P.forEach(p => {
+      const dx = T.X(p.x, p.y) - p.X, dy = T.Y(p.x, p.y) - p.Y;
+      const lat = new MC(p.X, p.Y, 0).toLngLat().lat * Math.PI / 180;
+      sum += (dx * dx + dy * dy) * Math.pow(40075016.686 * Math.cos(lat), 2);
+    });
+    msg += ' RMS 残差: 約 ' + Math.sqrt(sum / n).toFixed(1) + ' m';
+  }
+  status(msg);
+
+  whenReady(right, () => {
+    const op = parseFloat($('opacity').value);
+    if (right.getSource('ov')) {
+      right.getSource('ov').setCoordinates(coords);
+      right.setLayoutProperty('ov', 'visibility', 'visible');
+    } else {
+      right.addSource('ov', { type: 'image', url: objUrl, coordinates: coords });
+      right.addLayer({ id: 'ov', type: 'raster', source: 'ov', paint: { 'raster-opacity': op, 'raster-fade-duration': 0 } });
+    }
+  });
+}
+
+$('opacity').addEventListener('input', e => {
+  if (right.getLayer('ov')) right.setPaintProperty('ov', 'raster-opacity', parseFloat(e.target.value));
+});
+
+/* ---------- 地名検索(Nominatim) ---------- */
+async function search() {
+  const q = $('q').value.trim();
+  if (!q) return;
+  try {
+    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q));
+    const j = await r.json();
+    if (!j.length) { status('該当する地名が見つかりませんでした。'); return; }
+    const bb = j[0].boundingbox.map(Number);
+    right.fitBounds([[bb[2], bb[0]], [bb[3], bb[1]]], { maxZoom: 16 });
+  } catch (err) { status('検索に失敗しました。'); }
+}
+$('go').addEventListener('click', search);
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+
+/* ---------- 出力 ---------- */
+$('exp').addEventListener('click', () => {
+  if (!lastCoords) { status('3 組以上の対応点を指定してから出力してください。'); return; }
+  const c = lastCoords.map(p => '    [' + p[0].toFixed(7) + ', ' + p[1].toFixed(7) + ']').join(',\n');
+  $('code').value =
+`// 画像 URL は公開先のものに置き換えてください
+map.addSource('old-map', {
+  type: 'image',
+  url: '${fname}',
+  coordinates: [
+${c}
+  ]
+});
+map.addLayer({
+  id: 'old-map', type: 'raster', source: 'old-map',
+  paint: { 'raster-opacity': ${$('opacity').value} }
+});
+// 順序: 左上, 右上, 右下, 左下`;
+  $('out').classList.add('on');
+  window.dispatchEvent(new Event('resize'));
+});
+$('copy').addEventListener('click', () => {
+  $('code').select();
+  navigator.clipboard.writeText($('code').value).then(() => status('コピーしました。'));
+});
+/* ---------- GeoTIFF 書き出し(EPSG:3857、回転を含むアフィンをそのまま保持) ---------- */
+// BEGIN_GEOTIFF
+function buildGeoTiff(rgba, w, h, m) {
+  const nTags = 13, dataOff = 8, dataLen = w * h * 4;
+  let ifdOff = dataOff + dataLen; if (ifdOff % 2) ifdOff++;
+  const bpsOff = ifdOff + 2 + nTags * 12 + 4;   // BitsPerSample (8 bytes)
+  const geoOff = bpsOff + 8;                    // GeoKeyDirectory (32 bytes)
+  const mtOff = Math.ceil((geoOff + 32) / 8) * 8; // ModelTransformation (128 bytes)
+  const buf = new ArrayBuffer(mtOff + 128);
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  u8[0] = 0x49; u8[1] = 0x49;
+  dv.setUint16(2, 42, true); dv.setUint32(4, ifdOff, true);
+  u8.set(rgba, dataOff);
+  let p = ifdOff;
+  dv.setUint16(p, nTags, true); p += 2;
+  const SHORT = 3, LONG = 4, DOUBLE = 12;
+  const ent = (tag, type, count, val) => {
+    dv.setUint16(p, tag, true); dv.setUint16(p + 2, type, true); dv.setUint32(p + 4, count, true);
+    if (type === SHORT && count === 1) dv.setUint16(p + 8, val, true); else dv.setUint32(p + 8, val, true);
+    p += 12;
+  };
+  ent(256, LONG, 1, w); ent(257, LONG, 1, h);
+  ent(258, SHORT, 4, bpsOff); ent(259, SHORT, 1, 1); ent(262, SHORT, 1, 2);
+  ent(273, LONG, 1, dataOff); ent(277, SHORT, 1, 4); ent(278, LONG, 1, h); ent(279, LONG, 1, dataLen);
+  ent(284, SHORT, 1, 1); ent(338, SHORT, 1, 2);
+  ent(34264, DOUBLE, 16, mtOff); ent(34735, SHORT, 16, geoOff);
+  dv.setUint32(p, 0, true);
+  [8, 8, 8, 8].forEach((v, i) => dv.setUint16(bpsOff + i * 2, v, true));
+  [1, 1, 0, 3,  1024, 0, 1, 1,  1025, 0, 1, 1,  3072, 0, 1, 3857]
+    .forEach((v, i) => dv.setUint16(geoOff + i * 2, v, true));
+  m.forEach((v, i) => dv.setFloat64(mtOff + i * 8, v, true));
+  return buf;
+}
+// END_GEOTIFF
+
+$('tif').addEventListener('click', () => {
+  if (!lastT || !srcImg) { status('3 組以上の対応点を指定してから書き出してください。'); return; }
+  try {
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(srcImg, 0, 0);
+    const d = g.getImageData(0, 0, W, H).data;
+    const R = 40075016.685578488, T = lastT;
+    const m = [R * T.a, R * T.b, 0, R * (T.c - 0.5),
+               -R * T.d, -R * T.e, 0, R * (0.5 - T.f),
+               0, 0, 0, 0,  0, 0, 0, 1];
+    const blob = new Blob([buildGeoTiff(d, W, H, m)], { type: 'image/tiff' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fname.replace(/\.[^.]+$/, '') + '_3857.tif';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    status('GeoTIFF(EPSG:3857, 無圧縮 RGBA)を書き出しました。');
+  } catch (err) {
+    status('書き出しに失敗しました。画像が大きすぎる可能性があります。縮小して再度お試しください。');
+  }
+});
+</script>
+</body>
+</html>

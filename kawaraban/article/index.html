@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="gray">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>件の石はどこから来たのか</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;600;800&family=Yuji+Syuku&display=swap" rel="stylesheet">
+<script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+/* ---- テーマ:グレー(既定) / セピア。どちらもライト系 ---- */
+:root, :root[data-theme="gray"] {
+  --bg: #d6d6d6;
+  --paper: #f1f1f0;
+  --paper-grain: rgba(0,0,0,.02);
+  --frame: #e3e3e2;
+  --ink: #1a1a1a;
+  --soft: #555;
+  --accent: #333;
+  color-scheme: light;
+}
+:root[data-theme="sepia"] {
+  --bg: #cdbf9c;
+  --paper: #efe4c8;
+  --paper-grain: rgba(120,90,40,.035);
+  --frame: #e6d9b8;
+  --ink: #1d1a16;
+  --soft: #4a4136;
+  --accent: #b3261e;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--bg); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body {
+  margin: 0;
+  padding: clamp(8px, 3vw, 32px);
+  font-family: "Shippori Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  color: var(--ink);
+  line-height: 1.8;
+}
+
+/* テーマ切替(画面のみ) */
+.theme-switch {
+  position: fixed; top: 8px; right: 8px; z-index: 5;
+  display: flex; border: 1px solid var(--ink); background: var(--paper);
+  font-size: 13px;
+}
+.theme-switch button {
+  font: inherit; color: var(--ink); background: transparent;
+  border: 0; padding: 4px 12px; cursor: pointer;
+}
+.theme-switch button + button { border-left: 1px solid var(--ink); }
+.theme-switch button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+
+/* ---- 紙面 ---- */
+.sheet {
+  max-width: 900px;
+  margin: 0 auto;
+  background:
+    repeating-linear-gradient(0deg, var(--paper-grain) 0 2px, transparent 2px 5px),
+    var(--paper);
+  border: 3px solid var(--ink);
+  outline: 1px solid var(--ink);
+  outline-offset: -8px;
+  padding: clamp(16px, 3.4vw, 34px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: clamp(14px, 3vw, 30px);
+}
+
+.col { display: flex; flex-direction: column; gap: clamp(10px, 2vw, 18px); min-width: 0; }
+.col > * { flex: none; }
+
+/* 図版 */
+figure { margin: 0; break-inside: avoid; }
+.frame {
+  border: 2px solid var(--ink);
+  background: var(--frame);
+  overflow: hidden;
+  position: relative;
+}
+.frame img { width: 100%; height: 100%; display: block; object-fit: cover; }
+figcaption { font-size: clamp(11px, 1.4vw, 13px); color: var(--soft); line-height: 1.55; margin-top: 4px; }
+figcaption b { color: var(--ink); }
+
+/* 石(3D) + 縦書きの添え書き */
+.stone-row { display: flex; flex-direction: column; gap: 8px; }
+.viewer { width: 100%; aspect-ratio: 16 / 9; border: 3px solid var(--ink); background: var(--frame); position: relative; flex: none; }
+model-viewer { width: 100%; height: 100%; background: transparent; --poster-color: transparent; }
+.viewer .print-img { display: none; width: 100%; height: 100%; object-fit: contain; }
+.viewer .hint {
+  position: absolute; left: 4px; bottom: 3px; right: 4px;
+  font-size: 10px; line-height: 1.3; color: var(--soft);
+  background: color-mix(in srgb, var(--paper) 85%, transparent); padding: 0 4px;
+}
+.stone-cap {
+  font-size: clamp(11.5px, 1.5vw, 13px);
+  line-height: 1.7;
+  color: var(--ink);
+  min-width: 0;
+}
+.stone-cap b { color: var(--accent); font-weight: 600; }
+.stone-cap strong { font-family: "Yuji Syuku", serif; font-weight: 400; font-size: 1.6em; color: var(--accent); display: block; line-height: 1.3; }
+.stone-cap span { display: block; color: var(--soft); }
+
+/* 地図(モーダルを開く) */
+.map .frame { aspect-ratio: 16 / 9; }
+.open-map {
+  position: absolute; right: 6px; bottom: 6px;
+  font: inherit; font-size: 12px; color: var(--paper); background: var(--ink);
+  border: 0; padding: 3px 10px; cursor: pointer;
+}
+
+/* 図版は既定でグレー。触れる(ホバー・タップ・クリック)と色が戻る */
+.frame img, .viewer model-viewer, .viewer .print-img, .frame #walkMap {
+  filter: grayscale(1) contrast(.95);
+  transition: filter .45s ease;
+}
+@media (hover: hover) {
+  .frame:hover img, .viewer:hover model-viewer, .viewer:hover .print-img, .frame:hover #walkMap { filter: none; }
+}
+.frame.is-color img, .viewer.is-color model-viewer, .viewer.is-color .print-img, .frame.is-color #walkMap { filter: none; }
+@media (prefers-reduced-motion: reduce) {
+  .frame img, .viewer model-viewer, .frame #walkMap { transition: none; }
+}
+@media print {
+  .frame img, .viewer model-viewer, .viewer .print-img, .frame #walkMap { filter: none !important; }
+  .hint-color { display: none; }
+}
+
+/* 神社写真(ぐりぐり) */
+.tilt { perspective: 800px; }
+.tilt .frame { aspect-ratio: 16 / 9; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .15s ease-out; touch-action: pan-y; }
+.tilt img { transition: transform .15s ease-out, filter .45s ease; transform: scale(1.08); }
+
+/* 参考図書 */
+.ref .frame { aspect-ratio: 16 / 6; }
+.ref figcaption { margin-top: 6px; }
+.ref img { object-fit: contain; }
+
+/* ---- 右カラム ---- */
+.masthead { display: flex; flex-direction: row-reverse; gap: clamp(10px, 2vw, 18px); align-items: flex-start; }
+.nameplate {
+  writing-mode: vertical-rl;
+  font-family: "Yuji Syuku", serif; font-weight: 400;
+  font-size: clamp(34px, 6.4vw, 58px); line-height: 1.1; letter-spacing: .08em;
+  margin: 0; padding: .12em .08em;
+  min-height: 4.8em; white-space: nowrap; flex: none;
+  border: 3px solid var(--ink); background: var(--ink); color: var(--paper);
+}
+.kata {
+  writing-mode: vertical-rl;
+  font-family: "Yuji Syuku", serif; font-weight: 400;
+  font-size: clamp(22px, 4vw, 36px); line-height: 1.35; margin: 0;
+  height: max-content; white-space: nowrap; flex: none;
+}
+.dateline {
+  margin: 0; text-align: right;
+  font-size: clamp(12px, 1.7vw, 15px); letter-spacing: .14em;
+  border-bottom: 1px solid var(--ink); padding-bottom: 4px;
+}
+
+/* 紙面内の足跡地図 */
+.walk .frame { aspect-ratio: 5 / 4; }
+#walkMap { position: absolute; inset: 0; }
+.frame .walk-print { display: none; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.walk-ctrl { position: absolute; left: 6px; top: 6px; z-index: 2; display: flex; gap: 4px; }
+.walk-ctrl button {
+  font: inherit; font-size: 12px; color: var(--paper); background: var(--ink);
+  border: 0; padding: 3px 10px; cursor: pointer;
+}
+.walk-ctrl button:disabled { opacity: .5; cursor: default; }
+
+/* 縦書きの本文(各カラム内) */
+.tate {
+  writing-mode: vertical-rl;
+  width: 100%;
+  height: 20em; /* 初期値。JS が内容に合わせて調整する */
+  font-size: clamp(13px, 1.65vw, 15px);
+  line-height: 1.85;
+  overflow: hidden;
+  padding: .2em 0 .6em; /* 下端の余白。字が欠けないよう、自動調整の計算にも含まれる */
+  text-combine-upright: digits 4; /* 縦書き中の数字(1800・12 など)を正立させる */
+}
+.tate h2 {
+  font-family: "Yuji Syuku", serif; font-weight: 400; font-size: 1.35em;
+  color: var(--accent); margin: 0 0 0 .8em; padding-right: .35em;
+  border-right: .22em solid var(--accent); line-height: 1.4;
+}
+.mast-lead { flex: 1 1 0; min-width: 0; width: auto; font-size: clamp(12px, 1.5vw, 13.5px); padding-top: .2em; }
+.tate figure { break-inside: avoid; }
+/* 本文に回り込む写真(縦書きの上端に置き、下側に文字が回り込む) */
+.float-photo { float: inline-start; writing-mode: horizontal-tb; width: 11.5em; margin: 0 .7em .9em .7em; }
+.float-photo figcaption { font-size: .85em; margin-top: 3px; }
+.tate p { margin: 0 0 0 .6em; text-align: justify; font-size: 1em; }
+.tate .note { color: var(--soft); font-size: .9em; }
+.tate .note b { color: var(--accent); font-weight: 600; }
+.route {
+  writing-mode: horizontal-tb;
+  height: 100%; margin: 0 .5em;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5em;
+}
+.route .place {
+  writing-mode: vertical-rl;
+  font-family: "Yuji Syuku", serif; font-size: 1.5em; line-height: 1.2;
+  border-right: .1em solid var(--accent); padding-right: .15em;
+}
+.route .arrow { position: relative; width: 2px; height: 1.8em; background: var(--accent); margin-bottom: 8px; }
+.route .arrow::after {
+  content: ""; position: absolute; left: 50%; bottom: -7px; transform: translateX(-50%);
+  border: 6px solid transparent; border-top: 9px solid var(--accent); border-bottom: 0;
+}
+
+.ref-band { margin-top: auto; border-top: 1px solid var(--ink); padding-top: 10px; }
+
+footer {
+  grid-column: 1 / -1;
+  border-top: 3px double var(--ink); padding-top: 8px;
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 16px;
+  font-size: clamp(10px, 1.3vw, 12px); color: var(--soft); line-height: 1.6;
+}
+/* 枠外:ページの説明と文責 */
+.outside { max-width: 900px; margin: 10px auto 0; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 4px 24px; }
+.outside-note { margin: 0; flex: 1 1 320px; font-size: clamp(11px, 1.4vw, 13px); color: var(--soft); line-height: 1.7; }
+.bunsek { margin: 0; text-align: right; font-size: clamp(12px, 1.6vw, 14px); letter-spacing: .08em; }
+
+/* ---- 地図モーダル(MapLibre + 古地図 + 足跡) ---- */
+dialog#mapDialog {
+  padding: 0; border: 3px solid var(--ink); background: var(--paper); color: var(--ink);
+  width: min(96vw, 1100px); height: min(92dvh, 840px); max-width: none; max-height: none;
+}
+dialog#mapDialog[open] { display: flex; flex-direction: column; }
+dialog#mapDialog::backdrop { background: rgba(30, 28, 24, .55); }
+.modal-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--ink); font-size: 14px; }
+.modal-bar .spacer { flex: 1; }
+.modal-bar button, .modal-ctrl button {
+  font: inherit; font-size: 13px; color: var(--ink); background: transparent;
+  border: 1px solid var(--ink); padding: 4px 12px; cursor: pointer;
+}
+.modal-bar button:hover, .modal-ctrl button:hover:not(:disabled) { background: var(--frame); }
+.modal-ctrl button:disabled { opacity: .4; cursor: default; }
+.modal-body { flex: 1; min-height: 0; position: relative; background: var(--frame); }
+#geomap { position: absolute; inset: 0; }
+.modal-ctrl {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px;
+  padding: 8px 10px; border-top: 1px solid var(--ink); background: var(--paper);
+}
+.modal-ctrl .btns { display: flex; gap: 6px; }
+.modal-ctrl .fld { display: flex; flex-direction: column; gap: 2px; font-size: 12px; flex: 1 1 150px; min-width: 130px; }
+.modal-ctrl .fld label { color: var(--soft); }
+.modal-ctrl input[type="range"] { width: 100%; margin: 0; accent-color: var(--ink); }
+.modal-ctrl .chk { font-size: 12px; display: flex; align-items: center; gap: 4px; color: var(--soft); }
+@media (max-width: 640px) {
+  dialog#mapDialog { width: 100vw; height: 100dvh; border: 0; }
+}
+
+/* ---- 狭い画面:一列に積む ---- */
+@media (max-width: 760px) {
+  /* 狭い画面では、長文の縦書きは読みにくいため横書きにする */
+  .tate { writing-mode: horizontal-tb; height: auto !important; overflow: visible; padding: .2em 0; line-height: 1.9; }
+  .tate p { margin: 0 0 .8em; }
+  .tate h2 { margin: .4em 0 .5em; padding: 0 0 0 .5em; border-right: 0; border-left: .22em solid var(--accent); }
+  .masthead { flex-wrap: wrap; }
+  .mast-lead { flex: 1 1 100%; font-size: 14px; }
+  .float-photo { width: 46%; margin: .2em .9em .4em 0; }
+  .route { height: auto; margin: .2em 0 .8em; flex-direction: row; justify-content: flex-start; }
+  .route .arrow { width: 1.8em; height: 2px; margin: 0; }
+  .route .arrow::after { left: auto; right: -7px; bottom: auto; top: 50%; transform: translateY(-50%); border: 6px solid transparent; border-left: 9px solid var(--accent); border-right: 0; }
+  .route .place { writing-mode: horizontal-tb; border-right: 0; border-bottom: .1em solid var(--accent); padding: 0 .15em .1em; }
+  .theme-switch { position: static; width: max-content; margin: 0 0 8px auto; }
+  .sheet { grid-template-columns: 1fr; }
+  .col-right { order: -1; }
+}
+
+/* ---- 印刷:A4縦 ---- */
+@page { size: A4 portrait; margin: 7mm; }
+@media print {
+  html, body { background: none; }
+  body { padding: 0; }
+  .theme-switch, .open-map, .viewer .hint, .walk-ctrl { display: none !important; }
+  #walkMap { display: none; }
+  .frame .walk-print { display: block; }
+  .sheet { max-width: none; aspect-ratio: auto; height: auto; padding: 6mm; gap: 6mm; grid-template-columns: 1.05fr 1fr; }
+  .col-right { order: 0; }
+  .tate { font-size: 8.6pt; }
+  figcaption { font-size: 7.5pt; }
+  footer { font-size: 7pt; }
+  .stone-cap { font-size: 8.5pt; }
+  .viewer model-viewer { display: none; }
+  .viewer .print-img { display: block; }
+  .tilt .frame { transform: none; }
+  .tilt img { transform: none; }
+  .outside { max-width: none; margin-top: 2mm; }
+  .outside-note, .bunsek { font-size: 8.5pt; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tilt .frame, .tilt img { transition: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="theme-switch" role="group" aria-label="配色の切り替え">
+  <button type="button" data-theme-btn="gray" aria-pressed="true">グレー</button>
+  <button type="button" data-theme-btn="sepia" aria-pressed="false">セピア</button>
+</div>
+
+<article class="sheet">
+
+  <!-- 左:図版 -->
+  <div class="col col-left">
+
+    <div class="stone-row">
+      <div class="viewer">
+        <model-viewer src="./assets/stone.glb" alt="若宮神社の石の3Dモデル"
+          camera-controls touch-action="pan-y" auto-rotate shadow-intensity="1"></model-viewer>
+        <img class="print-img" src="./assets/stone.png" alt="若宮神社の石" onerror="this.style.display='none'">
+        <span class="hint">ドラッグで回転</span>
+      </div>
+      <div class="stone-cap">
+        <strong><ruby>件<rt>くだん</rt></ruby>の石</strong>
+        <span>若宮神社境内に残る刻印のある石</span>
+        <span><b>形状</b>　片面は強い侵食作用を受けている（凝灰岩のように見える）</span>
+        <span><b>刻印</b>　もう片面には、萬町から明治三十三年に有志によって献上された旨が刻まれている</span>
+      </div>
+    </div>
+
+    <figure class="map">
+      <div class="frame">
+        <img src="./assets/4-georeference.jpg" alt="ジオリファレンスの作業画面。左の古地図と右の現在の地図に対応点1〜7を打っている" loading="lazy">
+        <button type="button" class="open-map" id="openMap">地図を開く</button>
+      </div>
+      <figcaption><b>ジオリファレンス</b><br>デジタル撮影した写真に地理空間情報との対応関係を以て幾何補正し、実際の地図に重ね合わせられるようにした。</figcaption>
+    </figure>
+
+    <div class="tate" aria-label="いわれの推測">
+      <h2>いわれの推測</h2>
+      <p>萬町（万町）はどうやら現在の舞鶴にあったようで、その地から、海の安全を祈願する豊玉姫命を祀る若宮神社へ石が移され、安置されるようになったらしい。</p>
+      <div class="route" aria-label="石の移動経路">
+        <span class="place">萬町</span>
+        <span class="arrow" aria-hidden="true"></span>
+        <span class="place">若宮</span>
+      </div>
+      <figure class="tilt float-photo" id="tilt">
+        <div class="frame"><img src="./assets/5-wakamiya.jpg" alt="現在の若宮神社の様子" loading="lazy"></div>
+        <figcaption><b>現在の若宮神社の様子</b></figcaption>
+      </figure>
+      <p>1800年（寛政12年）当時は昭和通りが海岸線であり、若宮神社の遷座が地図作成以前、その後明治期までに萬町が埋立地に成立し、<ruby>磐座<rt>いわくら</rt></ruby>が移動されたと見られる。なお、明治33年は1900年、日露戦争の四年前である。</p>
+      <p>福岡藩の廃藩と、政府・行政による城下町の再開発に端を発した海岸線の埋め立ても重なり、海難安全の重要性が高まっていたのではないか。埋立地に位置する舞鶴地区には、福岡への新規流入者、周辺地域の旧城外の居住者、海産・海運関係者の住居があったと見られる。</p>
+    </div>
+
+  </div>
+
+  <!-- 右:題字・足跡地図・地図の出典 -->
+  <div class="col col-right">
+
+    <p class="dateline">2026年10月7日 夜刊</p>
+
+    <header class="masthead">
+      <h1 class="nameplate" aria-label="ふりくら">ふりくら</h1>
+      <p class="kata">この石は、<br>どこから来たのか。</p>
+      <div class="tate mast-lead" aria-label="はじめに">
+        <p>当班では、大名と今泉をつなぐ「上人橋交差点」「上人橋通り」の地名どおり、かつて実際に川が引き込まれていたことが古地図と現在の地図からわかり、濠や生活用水路がかつて存在した、古い水を訪ねることにした。</p>
+        <p>1800年ごろの古地図のジオリファレンスでタイポイントとしても用いた若宮神社を訪れたおり、現在は存在しない町名が刻まれた石が目に留まった。</p>
+      </div>
+    </header>
+
+    <figure class="walk">
+      <div class="frame walk-frame">
+        <div id="walkMap"></div>
+        <img id="walkPrint" class="walk-print" alt="今回歩いた経路">
+        <div class="walk-ctrl">
+          <button type="button" id="inPlay" disabled>歩く</button>
+          <button type="button" id="inReset">戻す</button>
+        </div>
+      </div>
+      <figcaption><b>今回の移動履歴</b>　記録した経路を足跡がたどる。</figcaption>
+    </figure>
+
+    <div class="tate" aria-label="位置関係">
+      <h2>位置関係</h2>
+      <p>1800年ごろの地図は縮尺や測距の精度が良くないものの、通りの位置関係には現在と変わらない部分もあり、養巴町通りや紺屋町の醤油屋・教会の角など、ジオリファレンスに使いやすい点が多かった。</p>
+      <p>地図の上側（博多湾方向）はより省略された書き方であったものの、岩田屋から警固公園にかけてはかつて濠だったこと、新天町周辺には面積の広い商人屋敷があったことなどがわかる。</p>
+      <p>なお、大名地区の市管理道の名称は、福岡藩当時の通り名とは異なっている。</p>
+    </div>
+
+    <!-- 本の紹介(最後) -->
+    <figure class="ref ref-band">
+      <div class="frame"><img src="./assets/6-reference.jpg" alt="参考にした書籍『古地図の中の福岡・博多』" loading="lazy"></div>
+      <figcaption><b>地図の出典</b><br>『古地図の中の福岡・博多』<br>宮崎克則　2005年刊<br>ISBN 978-4-87415-548-6 / C0021</figcaption>
+    </figure>
+
+  </div>
+
+  <footer>
+    <span>背景地図:&copy; OpenStreetMap contributors, OpenStreetMap Japan</span>
+  </footer>
+
+</article>
+
+<div class="outside">
+  <p class="outside-note">地図の加工性、二次利用については確認が必要です。作業の一場面として提示しています。<span class="hint-color"><br>図版は、触れる（ホバー・タップ・クリック）と色が戻ります。もう一度触れると固定を解除します。</span></p>
+  <p class="bunsek">文責:きどりん / うらた / Go / TaNaKa(チーム一同)</p>
+</div>
+
+<!-- 地図モーダル -->
+<dialog id="mapDialog" aria-label="古地図と歩いた跡">
+  <div class="modal-bar">
+    <strong>古地図と歩いた跡</strong>
+    <span class="spacer"></span>
+    <button type="button" id="closeMap">閉じる</button>
+  </div>
+  <div class="modal-body"><div id="geomap"></div></div>
+  <div class="modal-ctrl">
+    <div class="fld">
+      <label for="oldOpacity">古地図の濃さ <output id="oldOpacityOut">70</output>%</label>
+      <input type="range" id="oldOpacity" min="0" max="100" step="1" value="70">
+    </div>
+    <div class="btns">
+      <button type="button" id="walkPlay">歩く</button>
+      <button type="button" id="walkPause" disabled>停止</button>
+      <button type="button" id="walkReset">戻す</button>
+    </div>
+    <div class="fld">
+      <label for="walkSpeed">速さ <output id="walkSpeedOut">10</output> 倍速</label>
+      <input type="range" id="walkSpeed" min="1" max="60" step="1" value="10">
+    </div>
+    <label class="chk"><input type="checkbox" id="walkFollow" checked> 追従</label>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  // テーマ切替
+  var root = document.documentElement;
+  var themeBtns = document.querySelectorAll('[data-theme-btn]');
+  themeBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      root.dataset.theme = b.dataset.themeBtn;
+      themeBtns.forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+    });
+  });
+
+  // ---- 地図:MapLibre + 足跡アニメーション(紙面内の地図と拡大モーダルで共用) ----
+  var STYLE = 'https://tile.openstreetmap.jp/styles/osm-bright-ja/style.json';
+  var OLD_MAP = {
+    url: './assets/oldmap.webp', // 3-oldmap_3857.tif を WebP に変換したもの
+    // 元TIFFのアフィン変換から求めた四隅 [経度, 緯度]。順序: 左上, 右上, 右下, 左下
+    coords: [[130.388471, 33.5909086], [130.4035992, 33.593913], [130.4063196, 33.5874892], [130.3911913, 33.5844845]]
+  };
+  var GPX_URL = './assets/route.gpx';
+  // GPX が読めない環境(file:// など)向けの控え。assets/route.gpx と同じ内容
+  var ROUTE_FALLBACK = [[130.394461,33.586781],[130.394748,33.586877],[130.394881,33.586912],[130.394902,33.586913],[130.394918,33.58691],[130.394932,33.586906],[130.394954,33.586904],[130.394963,33.586905],[130.395093,33.586905],[130.395192,33.586942],[130.395294,33.586887],[130.395327,33.5868],[130.395331,33.586706],[130.395334,33.586696],[130.395342,33.586686],[130.395372,33.586593],[130.395369,33.586503],[130.395367,33.586496],[130.395366,33.586488],[130.395375,33.586477],[130.395391,33.58638],[130.395419,33.58629],[130.395439,33.5862],[130.395477,33.586104],[130.395511,33.586014],[130.395541,33.585924],[130.395626,33.585862],[130.395728,33.585826],[130.395833,33.585871],[130.39592,33.58593],[130.396005,33.585874],[130.396103,33.585926],[130.396206,33.585987],[130.396305,33.58603],[130.396419,33.586059],[130.396511,33.586109],[130.396609,33.586155],[130.396708,33.586203],[130.396777,33.586274],[130.396884,33.586306],[130.397005,33.586317],[130.397115,33.586335],[130.397195,33.586259],[130.397267,33.586157],[130.397333,33.586076],[130.397395,33.586002],[130.397508,33.586009],[130.397473,33.586105],[130.397394,33.586016],[130.397378,33.586111],[130.397314,33.58603],[130.3973,33.586127],[130.397264,33.586212],[130.397164,33.58626],[130.397216,33.586346],[130.397264,33.586434],[130.397358,33.586483],[130.397405,33.586594],[130.397472,33.586519],[130.397436,33.586608],[130.397423,33.586704],[130.397388,33.586793],[130.397367,33.586887],[130.397298,33.586964],[130.397229,33.587088],[130.397228,33.587088],[130.397174,33.587169],[130.39713,33.587256],[130.397074,33.587339],[130.39703,33.58743],[130.396981,33.587512],[130.396952,33.587604],[130.396918,33.587696],[130.396927,33.587799],[130.39686,33.587871],[130.396859,33.587962],[130.396841,33.588064],[130.396747,33.58811],[130.396753,33.588202],[130.396761,33.588312],[130.39676,33.588406],[130.396758,33.588504],[130.396734,33.588593],[130.396604,33.588614],[130.396491,33.588593],[130.396526,33.588685],[130.396499,33.588885],[130.396495,33.588758],[130.39643,33.588837],[130.396441,33.58893],[130.396389,33.589012],[130.396277,33.588985],[130.396157,33.588996],[130.396033,33.589002],[130.395927,33.589027],[130.39581,33.589056],[130.395698,33.589051],[130.395587,33.58904],[130.395473,33.589036],[130.395363,33.58902],[130.395353,33.589019],[130.395349,33.589016],[130.395252,33.589027],[130.395307,33.588908],[130.395212,33.588847],[130.395112,33.588806],[130.395103,33.588814],[130.395057,33.588844],[130.394941,33.588838],[130.394874,33.588767],[130.394772,33.588735],[130.394666,33.588718],[130.394552,33.588736],[130.394443,33.588727],[130.394384,33.58865],[130.394276,33.588636],[130.394172,33.58861],[130.394064,33.588573],[130.393955,33.588551],[130.39385,33.588522],[130.393742,33.588499],[130.393595,33.588489],[130.393662,33.588407],[130.393688,33.588316],[130.393678,33.58821],[130.393675,33.588119],[130.393703,33.58803],[130.393778,33.587963],[130.39384,33.587883],[130.393861,33.587786],[130.393866,33.587767],[130.393868,33.587668],[130.39381,33.587753],[130.393858,33.587666],[130.393836,33.587576],[130.39382,33.587484],[130.39388,33.587409],[130.393918,33.587312],[130.394026,33.587281],[130.394046,33.587372],[130.394016,33.587279],[130.394075,33.587201],[130.394064,33.587106],[130.394103,33.587014],[130.394141,33.586927],[130.394123,33.586836],[130.394231,33.586779],[130.394333,33.586808],[130.394441,33.58679],[130.39443,33.58667],[130.39443,33.586666]];
+  var FOOT_SVG = {
+    left: '<svg xmlns="http://www.w3.org/2000/svg" width="180" height="445" viewBox="0 0 180 445"><path d="M75.071,4.266C-10.704,31.698 -16.038,193.626 24.286,286.506L161.274,276.262C161.274,276.262 179.743,195.162 179.102,115.738C178.753,72.408 154.083,-21.001 75.071,4.266Z" fill="#4b4b4b"/><path d="M29.257,322.665C29.257,322.665 24.653,454.147 116.271,443.983C197.451,434.977 166.076,308.28 166.076,308.28L29.257,322.665Z" fill="#4b4b4b"/></svg>',
+    right: '<svg xmlns="http://www.w3.org/2000/svg" width="180" height="445" viewBox="0 0 180 445"><g transform="matrix(1,0,0,1,-2.22973,-4.73512)"><g transform="matrix(0.821023,0,0,0.957468,-244.663,3.84385)"><g transform="matrix(1.21799,0,0,1.04442,-104.733,0.930859)"><path d="M436.927,4.266C357.917,-21.002 333.247,72.408 332.897,115.738C332.255,195.163 350.725,276.262 350.725,276.262L487.711,286.506C528.038,193.626 522.704,31.698 436.927,4.266Z" fill="#4b4b4b"/><path d="M345.925,308.28C345.925,308.28 314.55,434.977 395.728,443.983C487.347,454.147 482.744,322.665 482.744,322.665L345.925,308.28Z" fill="#4b4b4b"/></g></g></g></svg>'
+  };
+
+
+  var R = 6371000, WALK_SPEED = 1.4, FADE_IN_MS = 250, FADE_OUT_STEPS = 6, SIDE_OFFSET = 5;
+  function rad(d) { return d * Math.PI / 180; }
+  function deg(r) { return r * 180 / Math.PI; }
+  function haversine(a, b) {
+    var dLat = rad(b[1] - a[1]), dLon = rad(b[0] - a[0]);
+    var s = Math.pow(Math.sin(dLat / 2), 2) + Math.cos(rad(a[1])) * Math.cos(rad(b[1])) * Math.pow(Math.sin(dLon / 2), 2);
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+  function bearing(a, b) {
+    var y = Math.sin(rad(b[0] - a[0])) * Math.cos(rad(b[1]));
+    var x = Math.cos(rad(a[1])) * Math.sin(rad(b[1])) - Math.sin(rad(a[1])) * Math.cos(rad(b[1])) * Math.cos(rad(b[0] - a[0]));
+    return (deg(Math.atan2(y, x)) + 360) % 360;
+  }
+  function destination(p, brg, d) {
+    var lat1 = rad(p[1]), lon1 = rad(p[0]), t = rad(brg);
+    var lat2 = Math.asin(Math.sin(lat1) * Math.cos(d / R) + Math.cos(lat1) * Math.sin(d / R) * Math.cos(t));
+    var lon2 = lon1 + Math.atan2(Math.sin(t) * Math.sin(d / R) * Math.cos(lat1), Math.cos(d / R) - Math.sin(lat1) * Math.sin(lat2));
+    return [deg(lon2), deg(lat2)];
+  }
+  function pointAt(route, dist) {
+    var c = route.coords, cum = route.cum;
+    if (dist <= 0) return { lngLat: c[0], bearing: bearing(c[0], c[1]) };
+    if (dist >= route.total) { var n = c.length; return { lngLat: c[n - 1], bearing: bearing(c[n - 2], c[n - 1]) }; }
+    var lo = 0, hi = cum.length - 1;
+    while (hi - lo > 1) { var mid = (lo + hi) >> 1; if (cum[mid] <= dist) lo = mid; else hi = mid; }
+    var seg = cum[hi] - cum[lo], t = seg > 0 ? (dist - cum[lo]) / seg : 0, a = c[lo], b = c[hi];
+    return { lngLat: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], bearing: bearing(a, b) };
+  }
+  function collapseAttrib(map) {
+    var el = map.getContainer().querySelector('.maplibregl-ctrl-attrib');
+    if (el) { el.classList.remove('maplibregl-compact-show'); el.removeAttribute('open'); }
+  }
+  function emptyFC() { return { type: 'FeatureCollection', features: [] }; }
+
+  // 足跡アイコン(SVG→ImageData)とルートは、複数の地図で共有する
+  function svgToImageData(svg) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+      var im = new Image();
+      im.onload = function () {
+        var cv = document.createElement('canvas'); cv.width = 180; cv.height = 445;
+        var cx = cv.getContext('2d'); cx.drawImage(im, 0, 0, 180, 445);
+        URL.revokeObjectURL(url);
+        resolve(cx.getImageData(0, 0, 180, 445));
+      };
+      im.onerror = reject;
+      im.src = url;
+    });
+  }
+  var footPromise = null, routePromise = null;
+  function getFootImages() {
+    if (!footPromise) footPromise = Promise.all([svgToImageData(FOOT_SVG.left), svgToImageData(FOOT_SVG.right)]);
+    return footPromise;
+  }
+  function getRoute() {
+    if (!routePromise) {
+      routePromise = fetch(GPX_URL).then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+        .then(function (txt) {
+          var doc = new DOMParser().parseFromString(txt, 'text/xml');
+          var pts = Array.prototype.map.call(doc.getElementsByTagName('trkpt'), function (pt) {
+            return [parseFloat(pt.getAttribute('lon')), parseFloat(pt.getAttribute('lat'))];
+          });
+          if (pts.length < 2) throw new Error('no points');
+          return pts;
+        })
+        .catch(function () { return ROUTE_FALLBACK; })
+        .then(function (coords) {
+          var cum = [0];
+          for (var i = 1; i < coords.length; i++) cum.push(cum[i - 1] + haversine(coords[i - 1], coords[i]));
+          return { coords: coords, cum: cum, total: cum[cum.length - 1] };
+        });
+    }
+    return routePromise;
+  }
+  function boundsOf(coords) {
+    return coords.reduce(function (bb, c) { return bb.extend(c); }, new maplibregl.LngLatBounds(coords[0], coords[0]));
+  }
+
+  // o: { container, overlay, cooperative, preserve, followZoom, fit('overlay'|'route'), onState(name) }
+  function createWalkMap(o) {
+    var opts = { container: o.container, style: STYLE, center: [130.3945, 33.5885], zoom: 15,
+      attributionControl: false, preserveDrawingBuffer: !!o.preserve };
+    if (o.cooperative) {
+      opts.cooperativeGestures = true;
+      opts.locale = {
+        'CooperativeGesturesHandler.WindowsHelpText': 'Ctrl + スクロールで地図を拡大・縮小',
+        'CooperativeGesturesHandler.MacHelpText': '⌘ + スクロールで地図を拡大・縮小',
+        'CooperativeGesturesHandler.MobileHelpText': '2本指で地図を動かす'
+      };
+    }
+    var map = new maplibregl.Map(opts);
+    map.addControl(new maplibregl.AttributionControl({ compact: !!o.compact,
+      customAttribution: '© OpenStreetMap contributors, OpenStreetMap Japan' + (o.overlay ? ' / 古地図: 宮崎克則『古地図の中の福岡・博多』(2005)' : '') }));
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
+
+    var lw = 0, lh = 0;
+    new ResizeObserver(function (en) {
+      var cr = en[0].contentRect;
+      if (Math.abs(cr.width - lw) > 1 || Math.abs(cr.height - lh) > 1) { lw = cr.width; lh = cr.height; map.resize(); }
+    }).observe(document.getElementById(o.container));
+
+    var route = null, playing = false, rafId = null, token = 0;
+    var distNow = 0, lastTs = null, stepCount = 0, footsteps = [];
+    var st = { speed: 10, stride: 28, trail: 12, follow: true };
+    var home = o.fit === 'overlay' ? boundsOf(OLD_MAP.coords) : null;
+    var opacity = o.opacity == null ? 0.7 : o.opacity;
+    function emit(n) { if (o.onState) o.onState(n); }
+
+    map.on('load', function () {
+      if (o.overlay) {
+        // 古地図は地名ラベルの下に置き、現代の地名が上に残るようにする
+        var firstSymbol = (map.getStyle().layers.filter(function (l) { return l.type === 'symbol'; })[0] || {}).id;
+        map.addSource('oldmap', { type: 'image', url: OLD_MAP.url, coordinates: OLD_MAP.coords });
+        map.addLayer({ id: 'oldmap', type: 'raster', source: 'oldmap', paint: { 'raster-opacity': opacity, 'raster-fade-duration': 0 } }, firstSymbol);
+      }
+      map.addSource('route', { type: 'geojson', data: emptyFC() });
+      map.addLayer({ id: 'route-line', type: 'line', source: 'route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#4b4b4b', 'line-width': 2, 'line-dasharray': [1, 2] } });
+      map.addSource('footsteps', { type: 'geojson', data: emptyFC() });
+      map.addLayer({ id: 'footsteps', type: 'symbol', source: 'footsteps',
+        layout: {
+          'icon-image': ['get', 'icon'], 'icon-rotate': ['get', 'bearing'],
+          'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map',
+          'icon-allow-overlap': true, 'icon-ignore-placement': true,
+          'icon-size': ['interpolate', ['exponential', 2], ['zoom'], 13, 0.015, 16, 0.09, 19, 0.5]
+        },
+        paint: { 'icon-opacity': ['get', 'op'] } });
+      if (home) map.fitBounds(home, { padding: 30, duration: 0 });
+      if (o.compact) { collapseAttrib(map); map.once('idle', function () { collapseAttrib(map); }); }
+
+      Promise.all([getFootImages(), getRoute()]).then(function (r) {
+        map.addImage('foot-left', r[0][0], { pixelRatio: 2 });
+        map.addImage('foot-right', r[0][1], { pixelRatio: 2 });
+        route = r[1];
+        map.getSource('route').setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: route.coords } });
+        if (!home) { home = boundsOf(route.coords); map.fitBounds(home, { padding: 28, duration: 0 }); }
+        emit('ready');
+      });
+    });
+
+    function walkFrame(ts) {
+      if (!playing) return;
+      if (lastTs === null) lastTs = ts;
+      var dt = (ts - lastTs) / 1000; lastTs = ts;
+      distNow += WALK_SPEED * st.speed * dt;
+      while (stepCount * st.stride <= distNow && stepCount * st.stride <= route.total) { placeFootstep(stepCount); stepCount++; }
+      updateOpacities(ts);
+      renderFootsteps();
+      if (st.follow) map.easeTo({ center: pointAt(route, distNow).lngLat, duration: 0 });
+      if (distNow >= route.total) { playing = false; emit('end'); return; }
+      rafId = requestAnimationFrame(walkFrame);
+    }
+    function placeFootstep(index) {
+      var p = pointAt(route, Math.min(index * st.stride, route.total));
+      var left = index % 2 === 0;
+      footsteps.push({ lngLat: destination(p.lngLat, p.bearing + (left ? -90 : 90), SIDE_OFFSET / 2), bearing: p.bearing, left: left, index: index, born: performance.now() });
+    }
+    function updateOpacities(now) {
+      var newest = stepCount - 1;
+      footsteps = footsteps.filter(function (f) {
+        var fadeIn = Math.min(1, (now - f.born) / FADE_IN_MS);
+        var behind = newest - f.index - st.trail;
+        var fadeOut = behind <= 0 ? 1 : Math.max(0, 1 - behind / FADE_OUT_STEPS);
+        f.op = fadeIn * fadeOut * 0.85;
+        return fadeOut > 0.01;
+      });
+    }
+    function renderFootsteps() {
+      map.getSource('footsteps').setData({ type: 'FeatureCollection', features: footsteps.map(function (f) {
+        return { type: 'Feature', geometry: { type: 'Point', coordinates: f.lngLat },
+          properties: { icon: f.left ? 'foot-left' : 'foot-right', bearing: f.bearing, op: f.op || 0 } };
+      }) });
+    }
+
+    return {
+      map: map,
+      isReady: function () { return !!route; },
+      play: function () {
+        if (!route) return;
+        if (distNow >= route.total) { distNow = 0; stepCount = 0; footsteps = []; renderFootsteps(); }
+        var my = ++token;
+        emit('playing');
+        function start() { if (my !== token) return; playing = true; lastTs = null; rafId = requestAnimationFrame(walkFrame); }
+        // 追従時は歩行者スケールまで寄せてから歩き出す(毎フレームの追従が寄せる動きを打ち消すため)
+        if (st.follow && map.getZoom() < o.followZoom - 0.1) {
+          map.once('moveend', start);
+          map.easeTo({ center: pointAt(route, distNow).lngLat, zoom: o.followZoom, duration: 800 });
+        } else start();
+      },
+      pause: function () {
+        token++; playing = false;
+        if (rafId) cancelAnimationFrame(rafId);
+        emit('paused');
+      },
+      reset: function () {
+        token++; playing = false;
+        if (rafId) cancelAnimationFrame(rafId);
+        distNow = 0; stepCount = 0; footsteps = []; lastTs = null;
+        if (map.getSource('footsteps')) renderFootsteps();
+        if (home) map.fitBounds(home, { padding: o.fit === 'overlay' ? 30 : 28, duration: 300 });
+        emit('ready');
+      },
+      setSpeed: function (v) { st.speed = v; },
+      setFollow: function (v) { st.follow = v; },
+      setOpacity: function (v) { opacity = v; if (map.getLayer('oldmap')) map.setPaintProperty('oldmap', 'raster-opacity', v); },
+      resize: function () { map.resize(); }
+    };
+  }
+
+  // ---- 紙面内の地図:見えたら一度だけ自動で歩く ----
+  var inPlay = document.getElementById('inPlay'), inReset = document.getElementById('inReset');
+  var inVisible = false, inStarted = false, inline = null;
+  function tryAuto() { if (!inStarted && inVisible && inline && inline.isReady()) { inStarted = true; inline.play(); } }
+  inline = createWalkMap({
+    container: 'walkMap', cooperative: true, preserve: true, compact: true, followZoom: 16.2, fit: 'route',
+    onState: function (n) {
+      inPlay.textContent = n === 'playing' ? '停止' : '歩く';
+      inPlay.disabled = !inline || !inline.isReady() && n !== 'ready';
+      if (n === 'ready') tryAuto();
+    }
+  });
+  inPlay.addEventListener('click', function () {
+    if (inPlay.textContent === '停止') inline.pause(); else { inStarted = true; inline.play(); }
+  });
+  inReset.addEventListener('click', function () { inStarted = true; inline.reset(); });
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (en) { inVisible = en[0].isIntersecting; tryAuto(); }, { threshold: 0.6 })
+      .observe(document.getElementById('walkMap'));
+  } else { inVisible = true; }
+  // 印刷時は WebGL の地図を静止画に置き換える
+  var walkPrint = document.getElementById('walkPrint');
+  window.addEventListener('beforeprint', function () {
+    try { walkPrint.src = inline.map.getCanvas().toDataURL('image/png'); } catch (e) {}
+  });
+
+  // ---- 拡大モーダル:古地図の重ね合わせ + 足跡 ----
+  var big = null;
+  var dlg = document.getElementById('mapDialog');
+  var bigPlay = document.getElementById('walkPlay'), bigPause = document.getElementById('walkPause');
+  function bigState(n) {
+    bigPlay.disabled = n === 'playing' || !(big && big.isReady());
+    bigPause.disabled = n !== 'playing';
+  }
+  document.getElementById('openMap').addEventListener('click', function () {
+    dlg.showModal();
+    requestAnimationFrame(function () {
+      if (!big) big = createWalkMap({ container: 'geomap', overlay: true, fit: 'overlay', followZoom: 16.5,
+        opacity: parseFloat(document.getElementById('oldOpacity').value) / 100, onState: bigState });
+      else big.resize();
+    });
+  });
+  function closeBig() { if (big) big.pause(); dlg.close(); }
+  document.getElementById('closeMap').addEventListener('click', closeBig);
+  dlg.addEventListener('click', function (e) { if (e.target === dlg) closeBig(); });
+  dlg.addEventListener('cancel', function () { if (big) big.pause(); });
+
+  document.getElementById('oldOpacity').addEventListener('input', function (e) {
+    document.getElementById('oldOpacityOut').textContent = e.target.value;
+    if (big) big.setOpacity(e.target.value / 100);
+  });
+  document.getElementById('walkSpeed').addEventListener('input', function (e) {
+    document.getElementById('walkSpeedOut').textContent = e.target.value;
+    if (big) big.setSpeed(parseFloat(e.target.value));
+  });
+  document.getElementById('walkFollow').addEventListener('change', function (e) { if (big) big.setFollow(e.target.checked); });
+  bigPlay.addEventListener('click', function () { if (big) big.play(); });
+  bigPause.addEventListener('click', function () { if (big) big.pause(); });
+  document.getElementById('walkReset').addEventListener('click', function () { if (big) big.reset(); });
+
+  // ---- 図版:タップ・クリックで色を固定/解除(ホバーできない端末でも色を戻せるように) ----
+  document.querySelectorAll('.frame, .viewer').forEach(function (el) {
+    var down = null;
+    el.addEventListener('pointerdown', function (e) { down = [e.clientX, e.clientY]; });
+    el.addEventListener('click', function (e) {
+      if (e.target.closest('button, a, .maplibregl-ctrl')) return;
+      // 地図やモデルをドラッグした後の click は無視する
+      if (down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6) return;
+      el.classList.toggle('is-color');
+    });
+  });
+
+  // ---- 縦書き本文:スクロールさせず、全文が収まる高さに自動調整(各ブロック) ----
+  var tates = document.querySelectorAll('.tate');
+  function fitTate() {
+    Array.prototype.forEach.call(tates, function (t) {
+      if (getComputedStyle(t).writingMode.indexOf('vertical') !== 0) { t.style.height = ''; return; }
+      for (var h = 8; h <= 240; h += 0.5) {
+        t.style.height = h + 'em';
+        if (t.scrollWidth <= t.clientWidth + 1) break;
+      }
+    });
+  }
+  fitTate();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitTate);
+  var fitTimer = null;
+  window.addEventListener('resize', function () { clearTimeout(fitTimer); fitTimer = setTimeout(fitTate, 120); });
+  var printMQ = window.matchMedia('print');
+  if (printMQ.addEventListener) printMQ.addEventListener('change', fitTate);
+
+  // 神社写真:ポインタに合わせた擬似的な奥行き(深度情報は使っていない)
+  var tilt = document.getElementById('tilt');
+  var frame = tilt.querySelector('.frame');
+  var pic = tilt.querySelector('img');
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    tilt.addEventListener('pointermove', function (e) {
+      var r = frame.getBoundingClientRect();
+      var x = (e.clientX - r.left) / r.width - 0.5;
+      var y = (e.clientY - r.top) / r.height - 0.5;
+      frame.style.setProperty('--rx', (-y * 7).toFixed(2) + 'deg');
+      frame.style.setProperty('--ry', (x * 9).toFixed(2) + 'deg');
+      pic.style.transform = 'translate(' + (-x * 16).toFixed(1) + 'px,' + (-y * 12).toFixed(1) + 'px) scale(1.1)';
+    });
+    tilt.addEventListener('pointerleave', function () {
+      frame.style.setProperty('--rx', '0deg');
+      frame.style.setProperty('--ry', '0deg');
+      pic.style.transform = '';
+    });
+  }
+})();
+</script>
+</body>
+</html>
