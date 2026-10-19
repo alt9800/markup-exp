@@ -15,4 +15,4 @@ Try and error regarding markup
 |[WebAR-test](./WebAR-test)|VPSの卵みたいな...|
 |[purupuru-Plateau](./purupuru)|プラトーをゼリーにする|
 |[kawaraban](./kawaraban/)|インタラクティブな新聞風のUIを試してみる。|
-|[shioyomi](./shioyomi/)|長部田海床路の様子を可視化する|
+|[Shioyomi](./Shioyomi/)|長部田海床路の様子を可視化する|
