@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>長部田の潮</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Tilt+Neon&family=Zen+Maru+Gothic:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f9f8;
+    --ink: #1d2422;
+    --sub: #5f6d68;
+    --neon: #128a62;
+    --neon-soft: rgba(18, 138, 98, 0.10);
+    --accent: #d9466f;
+    --line: #128a62;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", sans-serif;
+    min-height: 100svh;
+    display: flex;
+    justify-content: center;
+    padding: 24px 16px 32px;
+  }
+  main {
+    width: min(100%, 440px);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* 待受部分 */
+  .card {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 300 / 380;
+    border: 1px solid var(--line);
+    box-shadow: 0 0 6px rgba(18, 138, 98, 0.25), inset 0 0 6px rgba(18, 138, 98, 0.12);
+    background: #fbfcfb;
+    overflow: hidden;
+  }
+  .card svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .readout {
+    position: absolute;
+    right: 7%;
+    top: 5%;
+    text-align: center;
+    pointer-events: none;
+  }
+  .time {
+    font-family: "Tilt Neon", sans-serif;
+    font-size: clamp(40px, 13vw, 58px);
+    line-height: 1;
+    letter-spacing: 0.01em;
+    color: var(--ink);
+    text-shadow: 0 0 6px rgba(18, 138, 98, 0.28);
+    white-space: nowrap;
+  }
+  .time small {
+    font-family: "Zen Maru Gothic", sans-serif;
+    font-size: 0.36em;
+    letter-spacing: 0.04em;
+    margin-left: 0.15em;
+  }
+  .date {
+    font-size: 13px;
+    color: var(--sub);
+    margin-bottom: 4px;
+    min-height: 1em;
+  }
+  .phase {
+    margin-top: 14px;
+    font-size: clamp(18px, 5.4vw, 24px);
+    letter-spacing: 0.08em;
+  }
+  .scene {
+    margin-top: 6px;
+    font-size: 13px;
+    color: var(--sub);
+  }
+  .scene.best { color: var(--accent); }
+  .height {
+    margin-top: 2px;
+    font-family: "Tilt Neon", sans-serif;
+    font-size: 15px;
+    color: var(--sub);
+  }
+
+  /* シークバー */
+  .seek { width: 100%; }
+  .spark { width: 100%; height: 56px; display: block; }
+  .slider-wrap { position: relative; height: 28px; margin: 0 2px; }
+  .slider-wrap .rail {
+    position: absolute; left: 9px; right: 9px; top: 50%;
+    height: 1px; background: var(--line);
+    box-shadow: 0 0 4px rgba(18, 138, 98, 0.5);
+  }
+  .slider-wrap .dot {
+    position: absolute; top: 50%;
+    width: 14px; height: 14px; margin: -7px 0 0 -7px;
+    border: 1px solid var(--line); border-radius: 50%;
+    background: var(--bg);
+  }
+  .slider-wrap .dot.now { background: #d6ebe2; }
+  input[type=range] {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    margin: 0; background: transparent;
+    -webkit-appearance: none; appearance: none;
+    cursor: pointer;
+  }
+  input[type=range]:focus { outline: none; }
+  input[type=range]::-webkit-slider-runnable-track { background: transparent; height: 28px; }
+  input[type=range]::-moz-range-track { background: transparent; }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px; margin-top: 5px;
+    border-radius: 50%;
+    border: 1.5px solid var(--accent);
+    background: #fff;
+    box-shadow: 0 0 6px rgba(217, 70, 111, 0.55);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 1.5px solid var(--accent); background: #fff;
+    box-shadow: 0 0 6px rgba(217, 70, 111, 0.55);
+  }
+  input[type=range]:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .ticks {
+    display: flex; justify-content: space-between;
+    font-size: 12px; color: var(--sub);
+    margin-top: 6px;
+  }
+  .ticks button {
+    font: inherit; color: inherit; background: none; border: 0; padding: 2px 4px; cursor: pointer;
+  }
+  .ticks button:hover { color: var(--neon); }
+
+  /* 予定 */
+  .events {
+    font-size: 13px;
+    color: var(--sub);
+    line-height: 1.8;
+    border-top: 1px solid rgba(18, 138, 98, 0.3);
+    padding-top: 10px;
+  }
+  .events dl { display: grid; grid-template-columns: auto 1fr; gap: 0 12px; margin: 0; }
+  .events dt { color: var(--ink); }
+  .events dd { margin: 0; font-family: "Tilt Neon", "Zen Maru Gothic", sans-serif; }
+
+  footer {
+    font-size: 11px;
+    color: var(--sub);
+    line-height: 1.7;
+  }
+  footer a { color: inherit; }
+  .msg { font-size: 13px; color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <div class="card" id="card">
+    <svg id="scene" viewBox="0 0 300 380" role="img" aria-label="長部田海床路の潮の様子"></svg>
+    <div class="readout">
+      <div class="date" id="date"></div>
+      <div class="time" id="time">--:--<small>現在</small></div>
+      <div class="phase" id="phase">　</div>
+      <div class="scene" id="sceneLabel"></div>
+      <div class="height" id="height"></div>
+    </div>
+  </div>
+
+  <div class="seek">
+    <svg class="spark" id="spark" viewBox="0 0 300 56" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <div class="slider-wrap">
+      <div class="rail"></div>
+      <div class="dot" style="left:9px"></div>
+      <div class="dot now" style="left:50%"></div>
+      <div class="dot" style="left:calc(100% - 9px)"></div>
+      <input type="range" id="seek" min="-1440" max="1440" step="10" value="0" aria-label="表示する時刻（現在から前後24時間）">
+    </div>
+    <div class="ticks">
+      <button type="button" data-jump="-1440">24時間前</button>
+      <button type="button" data-jump="0">現在</button>
+      <button type="button" data-jump="1440">24時間後</button>
+    </div>
+  </div>
+
+  <div class="events" id="events"></div>
+  <div class="events" id="trip"></div>
+  <div class="msg" id="msg"></div>
+
+  <footer>
+    長部田海床路（熊本県宇土市）。潮位は近傍の熊本港の推算値で、現地とは時刻・高さに差があります。
+    道が水につかり始める潮位は仮の値（<span id="roadCm"></span> cm）です。
+    列車は住吉駅の時刻、徒歩は <span id="walk"></span> 分で見込んでいます。<br>
+    出典：<a href="https://www.data.jma.go.jp/kaiyou/db/tide/suisan/index.php" target="_blank" rel="noopener">気象庁「潮位表」熊本</a>（加工して作成）
+  </footer>
+</main>
+
+<script>
+(() => {
+  // ---- 設定 ----
+  const STATION = "KU"; // 気象庁 潮位表 地点記号（熊本）
+  // 道が水につかり始める潮位（潮位表基準面からのcm）。根拠のある値が未確認のため仮置き。
+  // URL の ?road=280 のように上書きして現地の様子と合わせる。
+  const params = new URLSearchParams(location.search);
+  const ROAD_CM = Number(params.get("road")) || 300;
+  document.getElementById("roadCm").textContent = ROAD_CM;
+
+  // 住吉駅の時刻表（JR九州の駅時刻表より手入力。曜日による違いは未反映）
+  const TRAIN_DOWN = ["0644","0747","0830","0930","1022","1157","1307","1406","1531","1634","1737","1852","1953","2058","2158","2322"]; // 三角方面（行き）
+  const TRAIN_UP   = ["0617","0705","0747","0849","0930","1043","1126","1306","1406","1509","1635","1737","1852","1953","2058","2159"]; // 宇土・熊本方面（帰り）
+  // 住吉駅〜長部田海床路の徒歩（分）。?walk=20-30 で上書き
+  const [WALK_MIN, WALK_MAX] = (params.get("walk") || "20-30").split("-").map(Number);
+  document.getElementById("walk").textContent = `${WALK_MIN}〜${WALK_MAX}`;
+
+  const HOUR = 3600e3;
+  const JST = 9 * HOUR;
+
+  // ---- 潮位表の取得と解析 ----
+  // 1行=1日。1-72桁: 毎時潮位(3桁×24), 73-78: 年月日, 79-80: 地点, 81-108: 満潮(時刻4+潮位3)×4, 109-136: 干潮×4
+  const hourly = new Map(); // JST基準のUTCミリ秒 → cm
+  const events = [];        // {t, cm, type: "high"|"low"}
+  const loadedYears = new Set();
+
+  const jstMs = (y, m, d, h = 0, mi = 0) => Date.UTC(y, m - 1, d, h, mi) - JST;
+
+  function parse(text) {
+    for (const line of text.split(/\r?\n/)) {
+      if (line.length < 80 || line.slice(78, 80) !== STATION) continue;
+      const y = 2000 + Number(line.slice(72, 74));
+      const m = Number(line.slice(74, 76));
+      const d = Number(line.slice(76, 78));
+      for (let h = 0; h < 24; h++) {
+        hourly.set(jstMs(y, m, d, h), Number(line.slice(h * 3, h * 3 + 3)));
+      }
+      const readEvents = (start, type) => {
+        for (let k = 0; k < 4; k++) {
+          const s = start + k * 7;
+          const tm = line.slice(s, s + 4);
+          if (tm === "9999") continue;
+          const hh = Number(tm.slice(0, 2)), mm = Number(tm.slice(2, 4));
+          events.push({ t: jstMs(y, m, d, hh, mm), cm: Number(line.slice(s + 4, s + 7)), type });
+        }
+      };
+      readEvents(80, "high");
+      readEvents(108, "low");
+    }
+    events.sort((a, b) => a.t - b.t);
+  }
+
+  async function loadYear(y) {
+    if (loadedYears.has(y)) return;
+    loadedYears.add(y);
+    const url = `https://www.data.jma.go.jp/kaiyou/data/db/tide/suisan/txt/${y}/${STATION}.txt`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${y}年の潮位表を取得できませんでした（${res.status}）`);
+    parse(await res.text());
+  }
+
+  // 毎時値を Catmull-Rom で補間
+  function tideAt(t) {
+    const t1 = Math.floor((t + JST) / HOUR) * HOUR - JST;
+    const p = [t1 - HOUR, t1, t1 + HOUR, t1 + 2 * HOUR].map(k => hourly.get(k));
+    if (p.some(v => v === undefined)) return null;
+    const u = (t - t1) / HOUR;
+    const [p0, q1, q2, p3] = p;
+    return 0.5 * ((2 * q1) + (-p0 + q2) * u + (2 * p0 - 5 * q1 + 4 * q2 - p3) * u * u + (-p0 + 3 * q1 - 3 * q2 + p3) * u * u * u);
+  }
+
+  // ---- 状態の判定 ----
+  const LEVELS = [
+    { max: ROAD_CM - 150, label: "干潟が広がり、道はすべて見える" },
+    { max: ROAD_CM - 60,  label: "沖から潮が寄ってくる" },
+    { max: ROAD_CM - 10,  label: "水際が道の先に近づく" },
+    { max: ROAD_CM + 40,  label: "道に水がかかる", best: true },
+    { max: ROAD_CM + 100, label: "道が沈み、電柱が並ぶ" },
+    { max: Infinity,      label: "電柱だけが海に立つ" },
+  ];
+  const levelOf = cm => LEVELS.findIndex(l => cm < l.max);
+
+  function phaseOf(t, cm) {
+    const near = events.find(e => Math.abs(e.t - t) <= 40 * 60e3);
+    if (near) return near.type === "high" ? "満潮" : "干潮";
+    const next = tideAt(t + 10 * 60e3);
+    return next > cm ? "上げ潮" : "下げ潮";
+  }
+
+  // ---- 月齢（簡易計算） ----
+  function moonPhase(t) {
+    const synodic = 29.530588853;
+    const days = (t - Date.UTC(2000, 0, 6, 18, 14)) / 86400e3;
+    return ((days / synodic) % 1 + 1) % 1; // 0=新月, 0.5=満月
+  }
+
+  // ---- 絵の生成（潮位レベルごとに固定の図） ----
+  const H = 160;                 // 水平線
+  const VPX = 118;               // 消失点のx
+  const yAt = z => H + (380 - H) / z;
+  const roadL = z => VPX - 62 / z;
+  const roadR = z => VPX + 18 / z;
+  const POLES = [1.15, 1.6, 2.2, 3, 4, 5.4, 7.4, 10];
+
+  // 波の位置（固定）
+  const WAVES = [
+    [250, 168], [196, 176], [278, 196], [220, 214], [168, 232], [262, 244], [205, 262],
+    [150, 286], [245, 290], [184, 312], [272, 322], [214, 342], [160, 360], [254, 364],
+    [30, 190], [18, 246], [40, 300], [12, 348], [140, 158], [60, 160],
+  ];
+  const SCENES = [
+    { edgeZ: 13,  road: "dry",  cut: 0,  waves: 0 },
+    { edgeZ: 7,   road: "dry",  cut: 0,  waves: 4 },
+    { edgeZ: 2.6, road: "dry",  cut: 0,  waves: 9 },
+    { edgeZ: 0,   road: "wet",  cut: 0,  waves: 13 },
+    { edgeZ: 0,   road: "none", cut: 14, waves: 17 },
+    { edgeZ: 0,   road: "none", cut: 34, waves: 20 },
+  ];
+
+  function wave(x, y) {
+    const s = 0.35 + 0.65 * (y - H) / (380 - H);
+    const w = 22 * s, h = 18 * s;
+    return `<path d="M${x - w} ${y} C${x - w * 0.35} ${y} ${x - w * 0.12} ${y - h * 0.45} ${x} ${y - h} Q${x + w * 0.25} ${y - h * 0.35} ${x + w * 0.85} ${y - h * 0.12}"/>`;
+  }
+
+  function moon(t) {
+    const ph = moonPhase(t);
+    const cx = 112, cy = 34, r = 12;
+    const rx = Math.abs(Math.cos(2 * Math.PI * ph)) * r;
+    let d;
+    if (ph < 0.5) {
+      const s2 = ph < 0.25 ? 0 : 1;
+      d = `M${cx} ${cy - r} A${r} ${r} 0 0 1 ${cx} ${cy + r} A${rx} ${r} 0 0 ${s2} ${cx} ${cy - r}Z`;
+    } else {
+      const s2 = ph > 0.75 ? 1 : 0;
+      d = `M${cx} ${cy - r} A${r} ${r} 0 0 0 ${cx} ${cy + r} A${rx} ${r} 0 0 ${s2} ${cx} ${cy - r}Z`;
+    }
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" stroke-opacity="0.22"/><path d="${d}" fill="rgba(18,138,98,0.12)"/>`;
+  }
+
+  function drawScene(level, t) {
+    const sc = SCENES[level];
+    const edgeY = sc.edgeZ ? yAt(sc.edgeZ) : 380;
+    let g = "";
+
+    // 水面
+    g += `<rect x="0" y="${H}" width="300" height="${edgeY - H}" fill="var(--neon-soft)" stroke="none"/>`;
+    g += `<line x1="0" y1="${H}" x2="300" y2="${H}" stroke-opacity="0.6"/>`;
+    if (sc.edgeZ) {
+      // 干潟の水際と泥の筋
+      g += `<path d="M0 ${edgeY} Q75 ${edgeY - 3} 150 ${edgeY} T300 ${edgeY}" stroke-opacity="0.8"/>`;
+      for (let i = 0; i < 9; i++) {
+        const y = edgeY + (380 - edgeY) * ((i + 0.6) / 9.5);
+        if (y > 372) continue;
+        const x = 175 + ((i * 53) % 110);
+        const w = 6 + 14 * (y - H) / 240;
+        g += `<line x1="${x}" y1="${y}" x2="${x + w}" y2="${y}" stroke-opacity="0.45"/>`;
+        g += `<line x1="${(x + 140) % 60 + 4}" y1="${y + 6}" x2="${(x + 140) % 60 + 4 + w * 0.7}" y2="${y + 6}" stroke-opacity="0.35"/>`;
+      }
+    }
+
+    // 道
+    const zFar = 12;
+    const zDryFrom = sc.edgeZ ? Math.min(sc.edgeZ, zFar) : zFar;
+    if (sc.road === "dry") {
+      g += `<line x1="${roadL(1)}" y1="380" x2="${roadL(zDryFrom)}" y2="${yAt(zDryFrom)}"/>`;
+      g += `<line x1="${roadR(1)}" y1="380" x2="${roadR(zDryFrom)}" y2="${yAt(zDryFrom)}"/>`;
+    } else if (sc.road === "wet") {
+      g += `<line x1="${roadL(1)}" y1="380" x2="${roadL(zFar)}" y2="${yAt(zFar)}" stroke-dasharray="10 5" stroke-opacity="0.7"/>`;
+      g += `<line x1="${roadR(1)}" y1="380" x2="${roadR(zFar)}" y2="${yAt(zFar)}" stroke-dasharray="10 5" stroke-opacity="0.7"/>`;
+      for (const z of [1.3, 1.9, 2.8, 4.2, 6.5]) {
+        const y = yAt(z);
+        g += `<line x1="${roadL(z) + 4 / z}" y1="${y}" x2="${roadR(z) - 4 / z}" y2="${y}" stroke="var(--accent)" stroke-opacity="0.7"/>`;
+      }
+    }
+
+    // 電柱
+    for (const z of POLES) {
+      const base = yAt(z);
+      const x = roadL(z) - 10 / z;
+      const hgt = 330 / z;
+      const w = Math.max(7 / z, 1.6);
+      const top = base - hgt;
+      const visBase = base - sc.cut / z;
+      g += `<rect x="${x - w / 2}" y="${top}" width="${w}" height="${visBase - top}"/>`;
+      g += `<line x1="${x - 13 / z}" y1="${top + 14 / z}" x2="${x + 13 / z}" y2="${top + 14 / z}"/>`;
+      if (sc.cut) {
+        g += `<line x1="${x - 9 / z}" y1="${visBase}" x2="${x + 9 / z}" y2="${visBase}" stroke-opacity="0.7"/>`;
+      }
+    }
+
+    // 波
+    WAVES.slice(0, sc.waves).forEach(([x, y0]) => {
+      const y = H + (y0 - 140) * (380 - H) / 240;
+      if (y > edgeY - 6) return;
+      g += wave(x, y);
+    });
+
+    return `
+      <defs>
+        <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="1.4" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <g filter="url(#glow)" fill="none" stroke="var(--neon)" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+        ${moon(t)}
+        ${g}
+      </g>`;
+  }
+
+  // ---- 48時間の潮位曲線 ----
+  function drawSpark(nowT, cursorT) {
+    const svg = document.getElementById("spark");
+    const t0 = nowT - 24 * HOUR, t1 = nowT + 24 * HOUR;
+    const pts = [];
+    let max = ROAD_CM + 150;
+    for (let t = t0; t <= t1; t += 20 * 60e3) {
+      const v = tideAt(t);
+      if (v === null) continue;
+      pts.push([t, v]);
+      max = Math.max(max, v);
+    }
+    const X = t => 9 + (t - t0) / (t1 - t0) * 282;
+    const Y = v => 52 - v / max * 46;
+    const path = pts.map(([t, v], i) => `${i ? "L" : "M"}${X(t).toFixed(1)} ${Y(v).toFixed(1)}`).join("");
+    const bandTop = Y(ROAD_CM + 40), bandBot = Y(ROAD_CM - 10);
+    svg.innerHTML = `
+      <rect x="0" y="${bandTop}" width="300" height="${bandBot - bandTop}" fill="rgba(217,70,111,0.10)"/>
+      <path d="${path}" fill="none" stroke="var(--neon)" stroke-width="1.2" vector-effect="non-scaling-stroke"/>
+      <line x1="${X(cursorT)}" y1="2" x2="${X(cursorT)}" y2="54" stroke="var(--accent)" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+  }
+
+  // ---- 表示 ----
+  const fmt = (t, withDate) => {
+    const d = new Date(t + JST);
+    const hm = `${d.getUTCHours()}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+    return withDate ? `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${hm}` : hm;
+  };
+  const dayKey = t => Math.floor((t + JST) / 86400e3);
+
+  const seek = document.getElementById("seek");
+  let lastLevel = -1, lastMoonDay = -1;
+
+  function render() {
+    const now = Date.now();
+    const offset = Number(seek.value);
+    const t = Math.round((now + offset * 60e3) / 60e3) * 60e3;
+    const cm = tideAt(t);
+
+    document.getElementById("date").textContent =
+      offset === 0 ? "" : (dayKey(t) === dayKey(now) ? "今日" : dayKey(t) < dayKey(now) ? "前日" : "翌日");
+    document.getElementById("time").innerHTML = `${fmt(t)}<small>${offset === 0 ? "現在" : ""}</small>`;
+
+    if (cm === null) {
+      document.getElementById("phase").textContent = "―";
+      document.getElementById("sceneLabel").textContent = "データなし";
+      document.getElementById("height").textContent = "";
+      return;
+    }
+    const level = levelOf(cm);
+    document.getElementById("phase").textContent = phaseOf(t, cm);
+    const sl = document.getElementById("sceneLabel");
+    sl.textContent = LEVELS[level].label;
+    sl.classList.toggle("best", !!LEVELS[level].best);
+    document.getElementById("height").textContent = `${Math.round(cm)} cm`;
+
+    // 絵はレベルか日付が変わったときだけ差し替える
+    if (level !== lastLevel || dayKey(t) !== lastMoonDay) {
+      document.getElementById("scene").innerHTML = drawScene(level, t);
+      lastLevel = level;
+      lastMoonDay = dayKey(t);
+    }
+    drawSpark(now, t);
+    renderEvents(t);
+  }
+
+  // 次の満潮・干潮と、見頃（道に水がかかる潮位帯）の時間帯
+  function renderEvents(t) {
+    const nextHigh = events.find(e => e.t > t && e.type === "high");
+    const nextLow = events.find(e => e.t > t && e.type === "low");
+    const lo = ROAD_CM - 10, hi = ROAD_CM + 40;
+    let start = null, end = null;
+    for (let s = t; s < t + 30 * HOUR; s += 5 * 60e3) {
+      const v = tideAt(s);
+      if (v === null) break;
+      const inBand = v >= lo && v < hi;
+      const rising = tideAt(s + 5 * 60e3) > v;
+      if (start === null && inBand && rising) start = s;
+      if (start !== null && !inBand) { end = s; break; }
+    }
+    const d = t;
+    const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+    document.getElementById("events").innerHTML = `<dl>
+      ${nextHigh ? row("次の満潮", `${fmt(nextHigh.t, dayKey(nextHigh.t) !== dayKey(d))}　${nextHigh.cm} cm`) : ""}
+      ${nextLow ? row("次の干潮", `${fmt(nextLow.t, dayKey(nextLow.t) !== dayKey(d))}　${nextLow.cm} cm`) : ""}
+      ${start !== null ? row("次の見頃", `${fmt(start, dayKey(start) !== dayKey(d))} 〜 ${end ? fmt(end, dayKey(end) !== dayKey(start)) : ""}（上げ潮）`) : ""}
+    </dl>`;
+    renderTrip(start, end);
+  }
+
+  // 見頃に合わせた行き（三角方面で住吉駅着）と帰り（住吉駅発の宇土方面）
+  function trainTimes(list, dayT) {
+    const d = new Date(dayT + JST);
+    const [y, m, dd] = [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()];
+    return list.map(s => jstMs(y, m, dd, Number(s.slice(0, 2)), Number(s.slice(2))));
+  }
+
+  function renderTrip(start, end) {
+    const box = document.getElementById("trip");
+    if (start === null || !end) { box.innerHTML = ""; return; }
+    const W1 = WALK_MIN * 60e3, W2 = WALK_MAX * 60e3;
+    const down = trainTimes(TRAIN_DOWN, start);
+    const up = trainTimes(TRAIN_UP, end);
+
+    // 行き：遅めに歩いても見頃の始まりに間に合う最後の列車。無ければ見頃の途中に着く最初の列車
+    let go = down.filter(t => t + W2 <= start).pop();
+    let goNote = "";
+    if (go === undefined) {
+      go = down.find(t => t + W1 < end);
+      goNote = go !== undefined ? "（見頃の途中から）" : "";
+    }
+    // 帰り：見頃の終わりまで見て、遅めに歩いても間に合う最初の列車。無ければ途中で切り上げる最終
+    let back = up.find(t => t >= end + W2);
+    let backNote = "";
+    if (back === undefined) {
+      back = up.filter(t => t - W2 > Math.max(start, go ?? start)).pop();
+      backNote = back !== undefined ? "（見頃の途中で切り上げ）" : "";
+    }
+
+    const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+    const leaveBy = back !== undefined ? back - W2 : null;
+    box.innerHTML = `<dl>
+      ${row("行き", go !== undefined
+        ? `住吉駅 ${fmt(go)} 着（三角方面）→ 現地 ${fmt(go + W1)}〜${fmt(go + W2)}${goNote}`
+        : "見頃に間に合う列車がありません")}
+      ${row("帰り", back !== undefined
+        ? `現地を ${fmt(leaveBy)} までに出る → 住吉駅 ${fmt(back)} 発（宇土方面）${backNote}`
+        : "見頃のあとに乗れる列車がありません")}
+    </dl>`;
+  }
+
+  seek.addEventListener("input", render);
+  document.querySelectorAll("[data-jump]").forEach(b =>
+    b.addEventListener("click", () => { seek.value = b.dataset.jump; render(); }));
+
+  async function init() {
+    const now = Date.now();
+    const years = new Set([-26, 0, 32].map(h => new Date(now + h * HOUR + JST).getUTCFullYear()));
+    try {
+      await Promise.all([...years].map(loadYear));
+    } catch (e) {
+      document.getElementById("msg").textContent = e.message;
+    }
+    render();
+    setInterval(() => { if (Number(seek.value) === 0) render(); }, 30e3);
+  }
+  init();
+})();
+</script>
+</body>
+</html>
