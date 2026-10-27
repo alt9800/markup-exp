@@ -1,0 +1,22 @@
+{
+  "id": "kamogawa-demachi-shijo",
+  "name": "鴨川 出町〜四条",
+  "bbox": {
+    "west": 135.7637,
+    "south": 35.0022,
+    "east": 135.7783,
+    "north": 35.0315
+  },
+  "unitM": 6,
+  "spawn": {
+    "name": "出町",
+    "lon": 135.7717,
+    "lat": 35.0296
+  },
+  "defaults": {
+    "tiltDeg": 4,
+    "exaggeration": 10,
+    "smoothM": 30
+  },
+  "buildings": "data/kamogawa-demachi-shijo.buildings.json"
+}

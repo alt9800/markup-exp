@@ -16,3 +16,4 @@ Try and error regarding markup
 |[purupuru-Plateau](./purupuru)|プラトーをゼリーにする|
 |[kawaraban](./kawaraban/)|インタラクティブな新聞風のUIを試してみる。|
 |[Shioyomi](./Shioyomi/)|長部田海床路の様子を可視化する|
+|[pinBall](./pinBallPlateau)|京都を舞台にしたオープンデータ基盤のピンボールゲーム|

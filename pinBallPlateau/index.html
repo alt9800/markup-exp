@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Kamogawa Pinball</title>
+  <meta name="description" content="鴨川（出町〜四条）の地形と建物を盤面にしたピンボール">
+  <style>
+:root {
+  --bg: #f7f8f9;
+  --panel: #ffffff;
+  --line: #d9dde2;
+  --text: #22272e;
+  --muted: #66707b;
+  --accent: #2b4a6f;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.stage {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#view {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  margin: 0;
+  display: flex;
+  gap: 16px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+.hud div { display: flex; gap: 6px; align-items: baseline; }
+.hud dt { font-size: 11px; color: var(--muted); letter-spacing: 0.05em; }
+.hud dd { margin: 0; font-weight: 600; min-width: 2.5em; }
+
+.panel {
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+
+.panel section { margin-top: 20px; }
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+
+button {
+  font: inherit;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+button:hover { background: #f1f3f5; }
+button.primary {
+  flex: 1 0 100%;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button.primary:active { background: #1d3550; }
+
+.keys { width: 100%; border-collapse: collapse; font-size: 13px; }
+.keys th { text-align: left; font-weight: normal; color: var(--muted); padding: 3px 8px 3px 0; white-space: nowrap; vertical-align: top; }
+.keys td { padding: 3px 0; }
+
+kbd {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  background: #fafbfc;
+}
+
+label { display: block; margin-bottom: 10px; font-size: 13px; }
+label output { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; margin: 4px 0 0; accent-color: var(--accent); }
+
+footer { margin-top: 24px; font-size: 12px; color: var(--muted); }
+footer a { color: inherit; }
+
+/* スマホ・縦長：盤面を上に確保し、操作とパラメータは下へスクロール */
+@media (max-width: 760px) {
+  .layout {
+    display: block;
+    height: auto;
+  }
+  .stage {
+    height: 82vh;
+    height: 82svh;
+  }
+  .panel {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    overflow: visible;
+  }
+  .buttons {
+    position: sticky;
+    top: 0;
+    padding: 8px 0;
+    background: var(--panel);
+  }
+  button.primary { padding: 12px; }
+  .keys tr:nth-child(n+4) { display: none; }
+}
+
+/* 地形版 */
+.status {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(247, 248, 249, 0.9);
+  color: var(--muted);
+}
+.status[hidden] { display: none; }
+
+.attribution {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 2px 6px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.8);
+}
+.attribution a { color: var(--text); }
+
+.seg { display: flex; flex: 1 0 100%; }
+.seg button { flex: 1; border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: 4px 0 0 4px; margin-left: 0; }
+.seg button:last-child { border-radius: 0 4px 4px 0; }
+.seg button[aria-pressed="true"] { background: #e8edf3; border-color: #b9c6d4; position: relative; }
+
+.legend td { padding-left: 8px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.legend thead td { color: var(--muted); font-size: 11px; }
+.swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 1px solid rgba(0, 0, 0, 0.15); vertical-align: -1px; }
+.note { margin: 8px 0; font-size: 12px; color: var(--muted); }
+@media (max-width: 760px) {
+  .legend tr:nth-child(n+4) { display: table-row; }
+}
+
+.ramp { display: flex; align-items: center; gap: 6px; margin: 10px 0 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ramp i { flex: 1; height: 8px; border: 1px solid rgba(0, 0, 0, 0.1); background: linear-gradient(90deg, #e3edd5 0%, #cfe2c0 30%, #e5e0b4 55%, #e2c99c 80%, #d2b08c 100%); }
+.ramp .water { margin-left: 8px; margin-right: 0; background: #a9cbe3; }
+label.check { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+label.check input { margin: 0; }
+
+.stage-select { margin-bottom: 12px; color: var(--muted); font-size: 12px; }
+.stage-select select { display: block; width: 100%; margin-top: 4px; padding: 6px 8px; font: inherit; font-size: 14px; color: var(--text); border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+
+/* 破壊時の得点表示 */
+.popup {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  text-shadow: 0 0 3px #fff, 0 0 6px #fff;
+  animation: popup 0.9s ease-out forwards;
+}
+@keyframes popup {
+  0% { opacity: 0; transform: translate(-50%, -30%) scale(0.6); }
+  15% { opacity: 1; transform: translate(-50%, -60%) scale(1.15); }
+  100% { opacity: 0; transform: translate(-50%, -200%) scale(1); }
+}
+#exag-1 { margin: -2px 0 12px; }
+
+button.nudge { flex: 1 0 100%; }
+
+/* 公開用プレイ版 */
+.play-buttons button { flex: 1 1 auto; }
+.play-buttons button.primary { flex: 1 0 100%; }
+[data-mode="play"] .legend td:nth-child(3) { display: none; }
+@media (max-width: 760px) {
+  .hud { gap: 10px; padding: 4px 8px; font-size: 13px; }
+  [data-mode="play"] .hud-pos { display: none; }
+}
+
+/* 盤面右上の円ボタン（消音） */
+.icon-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+}
+.icon-btn svg { width: 22px; height: 22px; }
+.mute-btn .off { display: none; }
+.mute-btn[aria-pressed="true"] .on { display: none; }
+.mute-btn[aria-pressed="true"] .off { display: inline; }
+.mute-btn[aria-pressed="true"] { color: var(--muted); }
+
+/* 折りたたみ */
+.panel details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 10px; }
+.panel summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  list-style-position: inside;
+}
+.panel details[open] summary { margin-bottom: 8px; }
+.credits { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 12px; }
+.credits dt { color: var(--muted); white-space: nowrap; }
+.credits dd { margin: 0; }
+.credits a { color: inherit; }
+
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+      "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier.es.js"
+    }
+  }
+  </script>
+</head>
+<body data-mode="play" data-stages="data/stages/" data-bgm="Audio/miyako-ni-kakeru.mp3">
+  <div class="layout">
+    <main id="stage" class="stage">
+      <canvas id="view"></canvas>
+      <dl class="hud">
+        <div><dt>SCORE</dt><dd id="score">0</dd></div>
+        <div><dt>BALL</dt><dd id="balls">3</dd></div>
+        <div class="hud-pos"><dt>POS</dt><dd id="place">-</dd></div>
+      </dl>
+      <span id="speed" hidden></span>
+      <button id="mute" class="icon-btn mute-btn" type="button" aria-pressed="false" aria-label="消音" title="消音">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/>
+          <path class="on" d="M16 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <path class="off" d="M16.5 9.5l5 5M21.5 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <p id="status" class="status">読み込み中</p>
+      <p class="attribution">
+        <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a> /
+        <a href="https://www.mlit.go.jp/plateau/" target="_blank" rel="noopener">PLATEAU</a>
+      </p>
+    </main>
+
+    <aside class="panel">
+      <div class="buttons play-buttons">
+        <button id="launch" class="primary" type="button">ボール投入</button>
+        <button id="nudge" type="button">台を揺らす</button>
+        <button id="reset-view" type="button">視点を戻す</button>
+      </div>
+
+      <details>
+        <summary>操作</summary>
+        <table class="keys">
+          <tr><th>フリッパー</th><td>画面の左半分・右半分をタッチ / <kbd>←</kbd> <kbd>→</kbd></td></tr>
+          <tr><th>台を揺らす</th><td>ボタン / <kbd>↑</kbd></td></tr>
+          <tr><th>視点</th><td>二本指 / 右ドラッグで回転、ピンチ / ホイールで拡大</td></tr>
+        </table>
+        <p class="note">ボール投入は、プレイ中に押すとやり直しになります。音は最初の操作で鳴り始めます。</p>
+      </details>
+
+      <details>
+        <summary>建物と得点</summary>
+        <table class="keys legend">
+          <thead><tr><th></th><td>破壊 / 総数</td><td>反発</td><td>耐久</td><td>得点</td></tr></thead>
+          <tbody id="legend"></tbody>
+        </table>
+        <p class="note">構造種別ごとに耐久と反発が違い、硬い建物ほど壊したときの得点が高い。</p>
+      </details>
+
+      <details>
+        <summary>データ・クレジット</summary>
+        <dl class="credits">
+          <dt>標高</dt><dd>国土地理院 標高タイル（DEM5A・DEM10B）</dd>
+          <dt>背景地図</dt><dd>国土地理院 地理院タイル（淡色地図）</dd>
+          <dt>建物</dt><dd>国土交通省 PLATEAU 京都市 建築物モデル（LOD1）</dd>
+          <dt>BGM</dt><dd>miyako ni kakeru © <a href="https://x.com/takatobi002" target="_blank" rel="noopener">takatobi002</a></dd>
+          <dt>物理ロジック参考</dt><dd>Friedrich_buryu</dd>
+          <dt>ライブラリ</dt><dd><a href="https://threejs.org/" target="_blank" rel="noopener">three.js</a> / <a href="https://rapier.rs/" target="_blank" rel="noopener">Rapier</a></dd>
+        </dl>
+      </details>
+    </aside>
+  </div>
+  <script type="module" src="js/kamogawa.js"></script>
+</body>
+</html>
