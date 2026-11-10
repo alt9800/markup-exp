@@ -79,7 +79,34 @@
   }
   #panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
   #panel h2 { margin: 0; font-size: .85rem; }
-  #fold { font-size: .68rem; padding: 3px 10px; margin: 0; }
+  #fold, #about-btn { font-size: .68rem; padding: 3px 10px; margin: 0 0 0 4px; }
+
+  /* ---- 説明ダイアログ ---- */
+  dialog {
+    border: 1.5px solid rgba(14,124,134,.35);
+    border-radius: 18px;
+    background: linear-gradient(170deg, #f4feff, #e4faf3);
+    color: var(--soda-deep);
+    padding: 18px 22px;
+    width: min(580px, calc(100vw - 32px));
+    max-height: 82vh; overflow-y: auto;
+    box-shadow: 0 16px 48px rgba(11,85,96,.25);
+  }
+  dialog::backdrop { background: rgba(11,85,96,.35); backdrop-filter: blur(3px); }
+  #about-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  dialog h2 { margin: 0; font-size: 1.05rem; }
+  dialog h3 { font-size: .9rem; margin: 18px 0 6px; border-bottom: 1.5px solid rgba(14,124,134,.3); padding-bottom: 4px; }
+  dialog p, dialog li { font-size: .8rem; line-height: 1.7; }
+  dialog ul { padding-left: 1.2em; margin: 6px 0; }
+  dialog li { margin-bottom: 8px; }
+  dialog code { background: rgba(14,124,134,.12); border-radius: 4px; padding: 0 4px; font-size: .95em; }
+  dialog table { border-collapse: collapse; font-size: .78rem; margin: 6px 0; width: 100%; }
+  dialog th, dialog td { border: 1px solid rgba(14,124,134,.3); padding: 4px 8px; text-align: left; }
+  dialog th { background: rgba(191,243,240,.5); }
+  .sw {
+    display: inline-block; width: .9em; height: .9em; border-radius: 3px;
+    border: 1px solid rgba(11,85,96,.4); margin-right: 5px; vertical-align: -1px;
+  }
   #panel.folded #panel-body { display: none; }
   #panel.folded #panel-head { margin-bottom: 0; }
   fieldset {
@@ -111,6 +138,15 @@
     outline: 3px solid var(--focus-ring); outline-offset: 2px;
   }
   #file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+  select {
+    font: inherit; font-size: .78rem; font-weight: 700;
+    color: var(--soda-deep);
+    background: linear-gradient(180deg, #ffffff, var(--soda-light));
+    border: 1.5px solid var(--soda-mid); border-radius: 999px;
+    padding: 6px 10px; margin: 2px 3px 6px 0; max-width: 100%;
+  }
+  select:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 
   #status {
     position: fixed; left: 12px; bottom: 12px; z-index: 10;
@@ -159,7 +195,10 @@
 <div id="panel">
   <div id="panel-head">
     <h2 id="ctl-heading">コントロール</h2>
-    <button type="button" id="fold" aria-expanded="true" aria-controls="panel-body">最小化</button>
+    <span>
+      <button type="button" id="about-btn">説明</button>
+      <button type="button" id="fold" aria-expanded="true" aria-controls="panel-body">最小化</button>
+    </span>
   </div>
   <div id="panel-body">
   <fieldset aria-labelledby="ctl-heading">
@@ -179,18 +218,65 @@
   </fieldset>
   <fieldset>
     <legend>都市モデル</legend>
+    <select id="spot" aria-label="拠点を選んでPLATEAU APIから読み込む">
+      <option value="">拠点から読込 (PLATEAU API)</option>
+      <option value="130.4204,33.5897">博多駅</option>
+      <option value="135.4959,34.7025">大阪駅</option>
+      <option value="139.6223,35.4658">横浜駅</option>
+      <option value="140.8824,38.2602">仙台駅</option>
+      <option value="141.3508,43.0686">札幌駅</option>
+      <option value="135.7588,34.9858">京都駅</option>
+      <option value="139.7003,35.6896">新宿駅</option>
+      <option value="139.7016,35.6580">渋谷駅</option>
+      <option value="132.4754,34.3978">広島駅</option>
+      <option value="136.8816,35.1709">名古屋駅</option>
+      <option value="139.7671,35.6812">東京駅 (重め)</option>
+    </select>
     <label class="filebtn" for="file">CityGML読込<input type="file" id="file" accept=".gml,.xml"></label>
     <button type="button" id="demo">デモ都市</button>
   </fieldset>
   <fieldset>
     <legend>モーション</legend>
-    <button type="button" id="shake" hidden>振って揺らす</button>
+    <button type="button" id="shake" hidden>振って揺らす (スマホ用)</button>
     <button type="button" id="motion" aria-pressed="false">一時停止</button>
   </fieldset>
   </div>
 </div>
 
 <div id="status" role="status" aria-live="polite">デモ都市を表示中</div>
+
+<dialog id="about" aria-labelledby="about-title">
+  <div id="about-head">
+    <h2 id="about-title">ぷるぷるぷらとぅの説明</h2>
+    <button type="button" id="about-close" autofocus>閉じる</button>
+  </div>
+
+  <section>
+    <h3>建物の属性と弾性の違い</h3>
+    <p>CityGMLの用途属性 (<code>bldg:usage</code>) に応じて、建物の「かたさ」(バネ定数の倍率) と色を変えています。倍率が小さいほどやわらかく、大きく長く揺れます。</p>
+    <table>
+      <thead><tr><th>用途</th><th>色</th><th>かたさ</th></tr></thead>
+      <tbody>
+        <tr><td>商業施設・宿泊など</td><td><span class="sw" style="background:#f6e6a2"></span>レモン</td><td>0.55〜0.6 (最もぷるぷる)</td></tr>
+        <tr><td>住宅・共同住宅など</td><td><span class="sw" style="background:#a9ecd2"></span>ミント</td><td>0.8〜0.85</td></tr>
+        <tr><td>業務施設</td><td><span class="sw" style="background:#bfe3f5"></span>ブルー</td><td>1.2</td></tr>
+        <tr><td>運輸倉庫・工場</td><td><span class="sw" style="background:#8fe6e0"></span>ティール</td><td>1.35〜1.4</td></tr>
+        <tr><td>官公庁・文教厚生</td><td><span class="sw" style="background:#9fd9ea"></span>ソーダ</td><td>1.5〜1.6 (かため)</td></tr>
+      </tbody>
+    </table>
+    <p>耐火建築物 (<code>uro:fireproofStructureType</code> = 耐火) はさらに1.4倍かたくなります。デモ都市では用途をランダムに割り当てています。建物をつかむと、画面左下に用途と耐火有無が表示されます。</p>
+  </section>
+
+  <section>
+    <h3>実装としてやっていること</h3>
+    <ul>
+      <li><strong>建物の弾性</strong>: 各建物を「根元固定の片持ちバネ」として扱い、CPUでは頂部の水平変位2自由度だけを減衰バネで解きます。見た目の変形はGPUの頂点シェーダーで、梁のたわみ曲線に沿った曲げ+断面の回転 (上面が引き込み側を向く) +体積保存風のつぶれを付けています。大きく引くと復元力が弱まり、ぐにゃりと倒れ込みます。</li>
+      <li><strong>建物どうしの相互作用</strong>: 都市生成時に近接ペアを列挙し、毎フレーム (1) 地盤を介した弱いバネ結合で揺れが伝搬、(2) 重なり合う高さで評価した断面円どうしのペナルティ接触で押し合います。</li>
+      <li><strong>ゼリー地盤 (WebGPU対応環境のみ)</strong>: 地面を96×96の波動方程式フィールドとしてコンピュートシェーダーで解き、クリックの衝撃波や地震が波紋として広がります。建物は波に乗って上下し、斜面の勾配で揺すられます。非対応環境では静的な地面になります (ヘッダのバッジで判定表示)。</li>
+      <li><strong>都市データ</strong>: CityGML (PLATEAU) をブラウザ内のDOMParserで解析し、LOD1立体を優先して三角形化します。「拠点から読込」はPLATEAU配信サービスのデータカタログAPIで座標から該当メッシュの建物ファイルを解決し、CDNから直接取得します。データはブラウザ内で処理され、外部に送信されません。</li>
+    </ul>
+  </section>
+</dialog>
 
 <script type="importmap">
 { "imports": {
@@ -553,13 +639,18 @@ function buildDemoCity() {
 buildDemoCity();
 
 /* ---------- CityGML パーサ (PLATEAU LOD1) ---------- */
-function parseCityGML(text) {
-  const doc = new DOMParser().parseFromString(text, 'application/xml');
-  if (doc.querySelector('parsererror')) throw new Error('XMLとして読めませんでした');
-  const bldgs = doc.getElementsByTagNameNS('*', 'Building');
+function parseCityGML(text) { return parseCityGMLDocs([text]); }
+/* 1メッシュが自治体境界をまたぐと自治体ごとの複数ファイルになるため、まとめて解析する */
+function parseCityGMLDocs(texts) {
+  const bldgs = [];
+  let firstPos = null;
+  for (const text of texts) {
+    const doc = new DOMParser().parseFromString(text, 'application/xml');
+    if (doc.querySelector('parsererror')) throw new Error('XMLとして読めませんでした');
+    bldgs.push(...doc.getElementsByTagNameNS('*', 'Building'));
+    firstPos ??= doc.getElementsByTagNameNS('*', 'posList')[0];
+  }
   if (!bldgs.length) throw new Error('bldg:Building が見つかりません');
-
-  const firstPos = doc.getElementsByTagNameNS('*', 'posList')[0];
   if (!firstPos) throw new Error('gml:posList が見つかりません');
   const probe = firstPos.textContent.trim().split(/\s+/, 3).map(Number);
   const geographic = probe[0] > 20 && probe[0] < 46 && probe[1] > 122 && probe[1] < 154;
@@ -582,7 +673,9 @@ function parseCityGML(text) {
     const attr = { ...(USAGE[usageEl?.textContent.trim()] ?? USAGE_DEFAULT) };
     const fpEl = bldgs[bi].getElementsByTagNameNS('*', 'fireproofStructureType')[0];
     if (fpEl && fpEl.textContent.trim() === '1001') { attr.fire = true; attr.kMul *= 1.4; }
-    const posLists = bldgs[bi].getElementsByTagNameNS('*', 'posList');
+    // LOD2入りデータは重複描画を避けるため lod1Solid を優先 (なければ建物全体から)
+    const lod1 = bldgs[bi].getElementsByTagNameNS('*', 'lod1Solid')[0];
+    const posLists = (lod1 ?? bldgs[bi]).getElementsByTagNameNS('*', 'posList');
     const verts = [];
     let minY = 1/0, maxY = -1/0, cx = 0, cz = 0, cn = 0;
     for (const pl of posLists) {
@@ -644,6 +737,48 @@ document.getElementById('file').addEventListener('change', async (e) => {
   }
 });
 document.getElementById('demo').addEventListener('click', buildDemoCity);
+
+/* ---------- PLATEAU API 拠点読み込み ----------
+   配信サービスのデータカタログAPI (CORS許可済み) で座標→建物GMLのURLを解決し、
+   CDNから直接取得する。CDNはgzip配信なので転送量は展開後サイズより大幅に小さい。 */
+const spotEl = document.getElementById('spot');
+spotEl.addEventListener('change', async () => {
+  const v = spotEl.value;
+  if (!v) return;
+  const label = spotEl.options[spotEl.selectedIndex].text;
+  spotEl.disabled = true;
+  try {
+    say(`${label}: PLATEAU APIに問い合わせ中…`);
+    const res = await fetch(`https://api.plateauview.mlit.go.jp/datacatalog/citygml/r:${v}?types=bldg`);
+    if (!res.ok) throw new Error(`API応答 ${res.status}`);
+    const cat = await res.json();
+    const seen = new Set();
+    const files = [];
+    for (const c of cat.cities ?? []) {
+      for (const f of c.files?.bldg ?? []) {
+        if (!f.url || seen.has(f.url)) continue;
+        seen.add(f.url);
+        files.push(f);
+      }
+    }
+    if (!files.length) throw new Error('この拠点の建物データが見つかりません');
+    const totalMB = files.reduce((s, f) => s + (f.fileSize ?? 0), 0) / 1048576;
+    say(`${label}: ダウンロード中… (${files.length}ファイル, 展開後 約${Math.max(1, Math.round(totalMB))}MB)`);
+    const texts = await Promise.all(files.map(f => fetch(f.url).then(r => {
+      if (!r.ok) throw new Error(`GML取得 ${r.status}`);
+      return r.text();
+    })));
+    say(`${label}: 解析中…`);
+    await new Promise(r => setTimeout(r, 30));
+    parseCityGMLDocs(texts);
+    say(`${label}: ${buildings.length}棟を読み込みました — つついてみてください`);
+  } catch (err) {
+    say(`読み込み失敗: ${err.message}`);
+  } finally {
+    spotEl.disabled = false;
+    spotEl.value = '';
+  }
+});
 
 /* ---------- 力を加えるインターフェース ---------- */
 const ray = new THREE.Raycaster();
@@ -756,6 +891,12 @@ shakeBtn.addEventListener('click', async () => {
     say('端末を振ってみてください');
   } catch { say('このブラウザではセンサーを使えません'); }
 });
+
+/* ---------- 説明ダイアログ ---------- */
+const aboutDlg = document.getElementById('about');
+document.getElementById('about-btn').addEventListener('click', () => aboutDlg.showModal());
+document.getElementById('about-close').addEventListener('click', () => aboutDlg.close());
+aboutDlg.addEventListener('click', (e) => { if (e.target === aboutDlg) aboutDlg.close(); }); // 枠外クリックで閉じる
 
 /* ---------- パネル最小化 ---------- */
 const foldBtn = document.getElementById('fold');
@@ -875,7 +1016,7 @@ function tick() {
 tick();
 
 /* 検証用デバッグAPI */
-window.__puru = { buildings: () => buildings, parseCityGML, wave: () => wave };
+window.__puru = { buildings: () => buildings, parseCityGML, parseCityGMLDocs, wave: () => wave };
 
 /* ---------- 泡 (装飾) ---------- */
 if (!reduceMotion) {
