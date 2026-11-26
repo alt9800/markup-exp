@@ -85,9 +85,10 @@
 </head>
 <body>
     <div id="overlay">
+        <nav id="lang-nav"></nav>
         <h1 style="margin-bottom: 16px; font-size: 26px;">WebXR immersive-ar</h1>
-        <button id="start-button">AR開始</button>
-        <div id="info">
+        <button id="start-button" data-i18n="start">AR開始</button>
+        <div id="info" data-i18n="desc">
             ドアや壁の縦平面を認識して枠を表示し、ボールを出力します。<br>
             配置後のオブジェクトは空間に固定され、回り込めます。<br>
             Android Chrome で動作します。
@@ -95,7 +96,58 @@
     </div>
 
     <div id="hud" class="hidden"><span id="hud-text">…</span></div>
-    <button id="reset-button" class="hidden">リセット</button>
+    <button id="reset-button" class="hidden" data-i18n="reset">リセット</button>
+
+    <script src="../i18n.js"></script>
+    <script>
+    I18N.init({
+        ja: {
+            start: 'AR開始',
+            desc: 'ドアや壁の縦平面を認識して枠を表示し、ボールを出力します。<br>' +
+                  '配置後のオブジェクトは空間に固定され、回り込めます。<br>' +
+                  'Android Chrome で動作します。',
+            reset: 'リセット',
+            'hud-aim': 'ドアや壁の縦平面にカメラを向けてください',
+            'hud-plane': 'ドアらしき平面を検出中',
+            'hud-tap': '縦平面を検出 — タップでドアを配置',
+            'hud-vertical': '壁やドアなど縦の面を狙ってください',
+            'hud-detected': 'ドアを検出しました',
+            'hud-balls': 'ボールが溢れています',
+            'err-session': 'ARセッションを開始できません',
+            'err-unsupported': 'この端末のブラウザではWebXR ARを利用できません。Android Chromeで開いてください。',
+        },
+        ko: {
+            start: 'AR 시작',
+            desc: '문이나 벽의 수직 평면을 인식해 프레임을 표시하고 공을 쏟아냅니다.<br>' +
+                  '배치된 오브젝트는 공간에 고정되어 돌아서 볼 수 있습니다.<br>' +
+                  'Android Chrome에서 동작합니다.',
+            reset: '초기화',
+            'hud-aim': '문이나 벽의 수직 평면에 카메라를 향해 주세요',
+            'hud-plane': '문으로 보이는 평면 감지 중',
+            'hud-tap': '수직 평면 감지 — 탭해서 문을 배치',
+            'hud-vertical': '벽이나 문 같은 수직면을 겨냥해 주세요',
+            'hud-detected': '문을 감지했습니다',
+            'hud-balls': '공이 쏟아지고 있습니다',
+            'err-session': 'AR 세션을 시작할 수 없습니다',
+            'err-unsupported': '이 기기의 브라우저에서는 WebXR AR을 사용할 수 없습니다. Android Chrome에서 열어 주세요.',
+        },
+        en: {
+            start: 'Start AR',
+            desc: 'Detects a vertical plane like a door or wall, shows a frame, and spills out balls.<br>' +
+                  'Placed objects stick to space and can be walked around.<br>' +
+                  'Runs on Android Chrome.',
+            reset: 'Reset',
+            'hud-aim': 'Point the camera at a vertical plane like a door or wall',
+            'hud-plane': 'Detecting a door-like plane',
+            'hud-tap': 'Vertical plane found — tap to place the door',
+            'hud-vertical': 'Aim at a vertical surface like a wall or door',
+            'hud-detected': 'Door detected',
+            'hud-balls': 'Balls are spilling out',
+            'err-session': 'Cannot start the AR session',
+            'err-unsupported': 'WebXR AR is not available in this browser. Open in Android Chrome.',
+        },
+    });
+    </script>
 
     <script type="importmap">
     { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
@@ -221,7 +273,7 @@
                     domOverlay: { root: document.body }
                 });
             } catch (e) {
-                alert(`ARセッションを開始できません: ${e.message}`);
+                alert(`${I18N.t('err-session')}: ${e.message}`);
                 startButton.disabled = false;
                 return;
             }
@@ -237,7 +289,7 @@
 
             overlay.classList.add('hidden');
             resetButton.classList.remove('hidden');
-            setHud('ドアや壁の縦平面にカメラを向けてください');
+            setHud(I18N.t('hud-aim'));
 
             renderer.setAnimationLoop(onXRFrame);
         }
@@ -261,7 +313,7 @@
             ballsActive = false;
             planeCandidate = null;
             planeCandidateFrames = 0;
-            if (xrSession) setHud('ドアや壁の縦平面にカメラを向けてください');
+            if (xrSession) setHud(I18N.t('hud-aim'));
         }
 
         // ==================== 配置 ====================
@@ -297,7 +349,7 @@
             placedAt = performance.now();
             reticle.visible = false;
             previewFrame.visible = false;
-            setHud('ドアを検出しました');
+            setHud(I18N.t('hud-detected'));
         }
 
         function onSelect() {
@@ -431,7 +483,7 @@
                     if (planeCandidateFrames >= CONFIG.AUTO_DETECT_STABLE_FRAMES) {
                         placeDoor(candidate.point, candidate.normal);
                     } else {
-                        setHud('ドアらしき平面を検出中');
+                        setHud(I18N.t('hud-plane'));
                     }
                 }
 
@@ -463,10 +515,10 @@
                                 previewFrame.visible = true;
                                 previewFrame.position.set(point.x, 0, point.z);
                                 previewFrame.rotation.y = Math.atan2(n.x, n.z);
-                                setHud('縦平面を検出 — タップでドアを配置');
+                                setHud(I18N.t('hud-tap'));
                             } else if (!candidate) {
                                 previewFrame.visible = false;
-                                setHud('壁やドアなど縦の面を狙ってください');
+                                setHud(I18N.t('hud-vertical'));
                             }
                         }
                     } else {
@@ -489,7 +541,7 @@
 
                 if (!ballsActive && elapsed > CONFIG.GLOW_DURATION) {
                     ballsActive = true;
-                    setHud('ボールが溢れています');
+                    setHud(I18N.t('hud-balls'));
                 }
                 // 開口部がじわっと暗くなる (異空間感)
                 if (portal) {
@@ -513,8 +565,9 @@
         async function init() {
             if (!navigator.xr || !(await navigator.xr.isSessionSupported?.('immersive-ar'))) {
                 startButton.disabled = true;
-                document.getElementById('info').textContent =
-                    'この端末のブラウザではWebXR ARを利用できません。Android Chromeで開いてください。';
+                const info = document.getElementById('info');
+                info.dataset.i18n = 'err-unsupported';   // 言語切り替え後も非対応表示を維持する
+                info.textContent = I18N.t('err-unsupported');
                 return;
             }
             setupThree();

@@ -47,6 +47,7 @@ window.Waterline = (function () {
     const maskCtx = maskCanvas.getContext('2d');
 
     let seed = null;           // タップ指定時のみ {x, y} (ソース座標比)
+    let mlMask = null;         // seg.js のMLマスク {data, W, H}。シードと選別の事前知識
     let maskGrid = null;       // 水面マスク (proc解像度, Uint8Array)
     let contour = null;        // マスク輪郭画素のインデックス配列
     let maskImage = null;      // 表示用の着色マスク
@@ -205,12 +206,37 @@ window.Waterline = (function () {
             horizonRow = y + 1;
         }
 
-        // シード: タップ指定時はその1点。既定では画面の中〜下部に格子状に
-        // ばら撒く (手前が土手で水面が画面中段にある構図にも届くように)
-        const seedPoints = seed
-            ? [seed]
-            : [0.15, 0.3, 0.5, 0.7, 0.85].flatMap(x =>
-                  [0.5, 0.65, 0.8, 0.9].map(y => ({ x, y })));
+        // MLマスク参照 (proc座標 → マスク座標の比例対応。どちらも同じフレームの
+        // 縮小なのでアスペクトは一致する)。カメラが動くとMLマスクは古くなるが、
+        // シード色として取り込んだクラスタは色で追従し続けるので実害は緩やか
+        const mlAt = mlMask
+            ? (x, y) => mlMask.data[
+                  ((y / H * mlMask.H) | 0) * mlMask.W + ((x / W * mlMask.W) | 0)]
+            : null;
+
+        // シード: タップ指定時はその1点。MLマスクがあればその内部から採る
+        // (境界の混色を避けるため4近傍もマスク内の画素のみ)。
+        // 既定では画面の中〜下部に格子状にばら撒く
+        let seedPoints;
+        if (seed) {
+            seedPoints = [seed];
+        } else if (mlAt) {
+            seedPoints = [];
+            for (let gy = 1; gy < 8; gy++) {
+                for (let gx = 1; gx < 8; gx++) {
+                    const x = (gx / 8 * W) | 0, y = (gy / 8 * H) | 0;
+                    if (y < horizonRow || y < 1 || y >= H - 1 || x < 1 || x >= W - 1) continue;
+                    if (mlAt(x, y) && mlAt(x - 1, y) && mlAt(x + 1, y) &&
+                        mlAt(x, y - 1) && mlAt(x, y + 1)) {
+                        seedPoints.push({ x: x / W, y: y / H });
+                    }
+                }
+            }
+        }
+        if (!seedPoints || seedPoints.length === 0) {
+            seedPoints = [0.15, 0.3, 0.5, 0.7, 0.85].flatMap(x =>
+                [0.5, 0.65, 0.8, 0.9].map(y => ({ x, y })));
+        }
 
         // 各シードの3x3平均をクラスタ中心にする (近い色のクラスタは統合)
         const clusters = [];
@@ -254,6 +280,7 @@ window.Waterline = (function () {
         }
 
         const counts = new Array(clusters.length).fill(0);
+        const mlHits = new Array(clusters.length).fill(0);
         const gradSums = new Array(clusters.length).fill(0);
         const colMin = new Array(clusters.length).fill(Infinity);
         const colMax = new Array(clusters.length).fill(-1);
@@ -272,6 +299,7 @@ window.Waterline = (function () {
             counts[best]++;
             gradSums[best] += grad[i];
             const x = i % W, y = (i / W) | 0;
+            if (mlAt && mlAt(x, y)) mlHits[best]++;
             if (x < colMin[best]) colMin[best] = x;
             if (x > colMax[best]) colMax[best] = x;
             // 受理画素で最寄りクラスタの中心を微更新。初期中心から離れた画素では
@@ -298,11 +326,16 @@ window.Waterline = (function () {
         // 水面らしさスコア: 広さ × 滑らかさに加えて、色味の事前知識を使う。
         // 水は緑〜青に寄りがち (Crが負 or Cbが正)、アスファルト・コンクリートは
         // 無彩色。これがないと「滑らかで広い」アスファルトが水に勝ってしまう
+        // MLマスクがあるときは、クラスタ画素のMLマスク重なり率を強い係数として
+        // 掛ける (重なり0でも即棄却はしない — マスクは古くなりうるため)。
+        // 色味の事前知識よりも意味論の判定を優先させる
         const scores = clusters.map((cl, k) => {
             if (counts[k] < total * 0.01) return -1;
             const span = colMax[k] - colMin[k] + 1;
             const chroma = Math.max(0, Math.max(-cl.f[1], cl.f[2]));
-            return span * counts[k] / (textures[k] + 3) * (1 + chroma / 8);
+            let s = span * counts[k] / (textures[k] + 3) * (1 + chroma / 8);
+            if (mlAt) s *= 0.1 + 3 * (mlHits[k] / counts[k]);
+            return s;
         });
         let bestK = -1;
         for (let k = 0; k < clusters.length; k++) {
@@ -329,9 +362,11 @@ window.Waterline = (function () {
                 f: cl.f.map(v => +v.toFixed(1)),
                 count: counts[k],
                 texture: +textures[k].toFixed(1),
+                mlOverlap: mlAt && counts[k] > 0 ? +(mlHits[k] / counts[k]).toFixed(2) : null,
                 score: +scores[k].toFixed(0),
                 kept: keep[k],
             })),
+            mlSeeded: !!mlAt && !seed,
             horizonRow,
             ratio: +(accepted / total).toFixed(3),
             reason: null,
@@ -518,6 +553,7 @@ window.Waterline = (function () {
         const y = (sy - oy) / scale / getH();
         if (x < 0 || x > 1 || y < 0 || y > 1) return false;
         seed = { x, y };
+        mlMask = null;   // タップは明示の訂正なのでML事前知識より優先する
         particles = [];
         return true;
     }
@@ -541,6 +577,7 @@ window.Waterline = (function () {
 
     function reset() {
         seed = null;
+        mlMask = null;
         maskGrid = null;
         contour = null;
         maskImage = null;
@@ -550,9 +587,16 @@ window.Waterline = (function () {
 
     function setStyle(s) { style = s; }
 
+    // seg.js のMLマスクを事前知識として設定する ({data, W, H} / null で解除)。
+    // タップシードは解除して、次回検出からML由来のシードに切り替える
+    function setMLMask(m) {
+        mlMask = m;
+        if (m) seed = null;
+    }
+
     return {
         CONFIG, init, reset, resize,
-        setOrientation, setSeedFromScreen, setStyle,
+        setOrientation, setSeedFromScreen, setStyle, setMLMask,
         // テスト・デバッグ用の内部状態アクセス
         get contour() { return contour; },
         get particles() { return particles; },

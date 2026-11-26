@@ -3,19 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebAR ベンチマーク</title>
+    <title>WebAR Benchmark</title>
     <style>
         body {
             margin: 0;
-            padding: 32px 20px;
+            padding: 24px 20px 40px;
             background: #14141e;
             color: #eee;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                         'Hiragino Sans', 'Apple SD Gothic Neo', sans-serif;
             line-height: 1.7;
         }
         main { max-width: 640px; margin: 0 auto; }
+
+        nav.lang {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        nav.lang button {
+            padding: 6px 18px;
+            font-size: 14px;
+            color: #aaa;
+            background: transparent;
+            border: 1px solid #444;
+            border-radius: 6px;
+        }
+        nav.lang button.active {
+            color: #14141e;
+            background: #e8e8e8;
+            border-color: #e8e8e8;
+        }
+
         h1 { font-size: 22px; margin: 0 0 8px; }
-        .lead { font-size: 14px; color: #aaa; margin-bottom: 28px; }
+        .lead { font-size: 14px; color: #aaa; margin-bottom: 24px; }
         a.demo {
             display: block;
             padding: 16px 18px;
@@ -30,52 +51,166 @@
         .demo h2 { font-size: 16px; margin: 0 0 4px; }
         .demo p { font-size: 13px; color: #aaa; margin: 0; }
         .demo .env { font-size: 12px; color: #789; margin-top: 6px; display: block; }
-        footer { margin-top: 28px; font-size: 12px; color: #666; }
+        footer { margin-top: 24px; font-size: 12px; color: #666; }
+
+        [data-lang] { display: none; }
     </style>
 </head>
 <body>
 <main>
-    <h1>WebAR ベンチマーク</h1>
-    <p class="lead">
-        「カメラ映像に何かを重ねる」を、アプローチ別に比べるためのデモ集。
-        上の3つはカメラAPIと画像処理のみ(iPhone / Android)、
-        最後の1つはWebXR(Android Chrome)。
-    </p>
+    <nav class="lang">
+        <button data-set-lang="ja">日本語</button>
+        <button data-set-lang="ko">한국어</button>
+        <button data-set-lang="en">English</button>
+    </nav>
 
-    <a class="demo" href="./door/">
-        <h2>ドア認識</h2>
-        <p>ドアの矩形を認識して枠を表示し、ボールを出力する。
-           実寸の仮定から距離を逆算し、3Dオブジェクトとして空間に置く。
-           トラッキングは回転のみ(3DoF)なので、歩くとずれる。</p>
-        <span class="env">iPhone / Android</span>
-    </a>
+    <!-- ==================== 日本語 ==================== -->
+    <div data-lang="ja">
+        <h1>WebAR ベンチマーク</h1>
+        <p class="lead">
+            「カメラ映像に何かを重ねる」を、アプローチ別に比べるためのデモ集。
+            上の3つはカメラAPIと画像処理のみ(iPhone / Android)、
+            最後の1つはWebXR(Android Chrome)。
+        </p>
+        <a class="demo" href="./door/">
+            <h2>ドア認識</h2>
+            <p>ドアの矩形を認識して枠を表示し、ボールを出力する。
+               実寸の仮定から距離を逆算し、3Dオブジェクトとして空間に置く。
+               トラッキングは回転のみ(3DoF)なので、歩くとずれる。</p>
+            <span class="env">iPhone / Android</span>
+        </a>
+        <a class="demo" href="./wireframe/">
+            <h2>ワイヤーフレーム</h2>
+            <p>カメラに映った輪郭を毎フレーム検出し、線として発光表示する。
+               画面空間エフェクト: 毎フレーム画像から計算し直すため、対象からずれない。
+               そのかわり3Dの奥行きは持たない。</p>
+            <span class="env">iPhone / Android</span>
+        </a>
+        <a class="demo" href="./waterline/">
+            <h2>水辺のライン認識</h2>
+            <p>水面をひとつの面(領域)として認識し、その上端の水際から光の粒を立ち上らせる。
+               認識位置は水面をタップして指定し直せる。</p>
+            <span class="env">iPhone / Android</span>
+        </a>
+        <a class="demo" href="./webxr/">
+            <h2>WebXR immersive-ar</h2>
+            <p>OSのトラッキング(SLAM / 6DoF)で縦平面を認識して枠とボールを表示する。
+               配置後のオブジェクトは空間に固定され、回り込んでも位置が保たれる。</p>
+            <span class="env">Android Chrome</span>
+        </a>
+        <footer>
+            すべて静的ファイルのみ・サーバーサイドなし。
+            カメラ利用のため、localhost以外ではHTTPSでの配信が必要。
+        </footer>
+    </div>
 
-    <a class="demo" href="./wireframe/">
-        <h2>ワイヤーフレーム</h2>
-        <p>カメラに映った輪郭を毎フレーム検出し、線として発光表示する。
-           画面空間エフェクト: 毎フレーム画像から計算し直すため、対象からずれない。
-           そのかわり3Dの奥行きは持たない。</p>
-        <span class="env">iPhone / Android</span>
-    </a>
+    <!-- ==================== 한국어 ==================== -->
+    <div data-lang="ko">
+        <h1>WebAR 벤치마크</h1>
+        <p class="lead">
+            "카메라 영상에 무언가를 겹치는" 방법을 접근법별로 비교하는 데모 모음.
+            위의 3개는 카메라 API와 이미지 처리만 사용(iPhone / Android),
+            마지막 1개는 WebXR(Android Chrome).
+        </p>
+        <a class="demo" href="./door/">
+            <h2>문 인식</h2>
+            <p>문의 사각형을 인식해 프레임을 표시하고 공을 쏟아낸다.
+               실제 크기 가정에서 거리를 역산해 3D 오브젝트로 공간에 배치한다.
+               트래킹은 회전만(3DoF)이므로 걸으면 어긋난다.</p>
+            <span class="env">iPhone / Android</span>
+        </a>
+        <a class="demo" href="./wireframe/">
+            <h2>와이어프레임</h2>
+            <p>카메라에 비친 윤곽을 매 프레임 검출해 발광하는 선으로 표시한다.
+               화면 공간 이펙트: 매 프레임 이미지에서 다시 계산하므로 대상에서 어긋나지 않는다.
+               대신 3D 깊이는 갖지 않는다.</p>
+            <span class="env">iPhone / Android</span>
+        </a>
+        <a class="demo" href="./waterline/">
+            <h2>수면 인식</h2>
+            <p>수면을 하나의 면(영역)으로 인식하고, 그 물가에서 빛의 입자를 피워 올린다.
+               인식 위치는 수면을 탭해서 다시 지정할 수 있다.</p>
+            <span class="env">iPhone / Android</span>
+        </a>
+        <a class="demo" href="./webxr/">
+            <h2>WebXR immersive-ar</h2>
+            <p>OS의 트래킹(SLAM / 6DoF)으로 수직 평면을 인식해 프레임과 공을 표시한다.
+               배치된 오브젝트는 공간에 고정되어 돌아서 봐도 위치가 유지된다.</p>
+            <span class="env">Android Chrome</span>
+        </a>
+        <footer>
+            모두 정적 파일만 사용, 서버 사이드 없음.
+            카메라 사용을 위해 localhost 이외에서는 HTTPS 배포가 필요.
+        </footer>
+    </div>
 
-    <a class="demo" href="./waterline/">
-        <h2>水辺のライン認識</h2>
-        <p>水面と岸の境界ラインを毎フレーム検出し、そこから光の粒を立ち上らせる。
-           ラインは画面空間、粒子は寿命つきのアニメーション。両者の組み合わせ。</p>
-        <span class="env">iPhone / Android</span>
-    </a>
-
-    <a class="demo" href="./webxr/">
-        <h2>WebXR immersive-ar</h2>
-        <p>OSのトラッキング(SLAM / 6DoF)で縦平面を認識して枠とボールを表示する。
-           配置後のオブジェクトは空間に固定され、回り込んでも位置が保たれる。</p>
-        <span class="env">Android Chrome</span>
-    </a>
-
-    <footer>
-        すべて静的ファイルのみ・サーバーサイドなし。
-        カメラ利用のため、localhost以外ではHTTPSでの配信が必要。
-    </footer>
+    <!-- ==================== English ==================== -->
+    <div data-lang="en">
+        <h1>WebAR Benchmark</h1>
+        <p class="lead">
+            A set of demos comparing approaches to overlaying content on a camera feed.
+            The first three use only the camera API and image processing (iPhone / Android);
+            the last one uses WebXR (Android Chrome).
+        </p>
+        <a class="demo" href="./door/">
+            <h2>Door detection</h2>
+            <p>Detects a door rectangle, draws a frame, and spills out balls.
+               Distance is back-solved from a real-size assumption and the object is
+               placed in 3D. Tracking is rotation-only (3DoF), so it drifts when you walk.</p>
+            <span class="env">iPhone / Android</span>
+        </a>
+        <a class="demo" href="./wireframe/">
+            <h2>Wireframe</h2>
+            <p>Detects contours in the camera image every frame and draws them as glowing
+               lines. A screen-space effect: recomputed from the image each frame, so it
+               never drifts — but it has no 3D depth.</p>
+            <span class="env">iPhone / Android</span>
+        </a>
+        <a class="demo" href="./waterline/">
+            <h2>Water surface</h2>
+            <p>Recognizes the water surface as a region and raises particles of light
+               from the water's edge. Tap the water to re-anchor the recognition.</p>
+            <span class="env">iPhone / Android</span>
+        </a>
+        <a class="demo" href="./webxr/">
+            <h2>WebXR immersive-ar</h2>
+            <p>Uses OS tracking (SLAM / 6DoF) to detect a vertical plane and show the frame
+               and balls. Placed objects stick to space and stay put as you walk around.</p>
+            <span class="env">Android Chrome</span>
+        </a>
+        <footer>
+            Static files only, no server side.
+            HTTPS is required for camera access anywhere other than localhost.
+        </footer>
+    </div>
 </main>
+
+<script>
+// 言語切り替え: ?lang= → localStorage → ブラウザ言語 の順で決める
+(function () {
+    const supported = ['ja', 'ko', 'en'];
+    function apply(lang) {
+        document.documentElement.lang = lang;
+        document.querySelectorAll('[data-lang]').forEach(el => {
+            el.style.display = el.dataset.lang === lang ? 'block' : 'none';
+        });
+        document.querySelectorAll('[data-set-lang]').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.setLang === lang);
+        });
+        try { localStorage.setItem('lang', lang); } catch (e) { /* private mode */ }
+    }
+
+    const param = new URLSearchParams(location.search).get('lang');
+    let saved = null;
+    try { saved = localStorage.getItem('lang'); } catch (e) { /* private mode */ }
+    const browser = (navigator.language || 'en').slice(0, 2);
+    const initial = [param, saved, browser].find(l => supported.includes(l)) || 'en';
+    apply(initial);
+
+    document.querySelectorAll('[data-set-lang]').forEach(btn => {
+        btn.addEventListener('click', () => apply(btn.dataset.setLang));
+    });
+})();
+</script>
 </body>
 </html>

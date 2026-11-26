@@ -82,20 +82,52 @@
     <canvas id="edge-layer"></canvas>
 
     <div id="start-overlay">
-        <h1 style="font-size:26px; margin-bottom:16px;">ワイヤーフレーム</h1>
-        <button id="start-button">カメラを起動</button>
-        <p>
+        <nav id="lang-nav"></nav>
+        <h1 style="font-size:26px; margin-bottom:16px;" data-i18n="title">ワイヤーフレーム</h1>
+        <button id="start-button" data-i18n="start">カメラを起動</button>
+        <p data-i18n="desc">
             カメラに映った輪郭を毎フレーム検出し、線として発光表示します。<br>
             建物や室内など、エッジのはっきりした対象に向けてください。
         </p>
     </div>
 
     <div id="controls" class="hidden">
-        <label for="threshold">感度</label>
+        <label for="threshold" data-i18n="sensitivity">感度</label>
         <input type="range" id="threshold" min="40" max="200" value="100">
     </div>
 
+    <script src="../i18n.js"></script>
     <script>
+    I18N.init({
+        ja: {
+            _title: 'ワイヤーフレーム',
+            title: 'ワイヤーフレーム',
+            start: 'カメラを起動',
+            desc: 'カメラに映った輪郭を毎フレーム検出し、線として発光表示します。<br>' +
+                  '建物や室内など、エッジのはっきりした対象に向けてください。',
+            sensitivity: '感度',
+            'err-camera': 'カメラを起動できません',
+        },
+        ko: {
+            _title: '와이어프레임',
+            title: '와이어프레임',
+            start: '카메라 시작',
+            desc: '카메라에 비친 윤곽을 매 프레임 검출해 발광하는 선으로 표시합니다.<br>' +
+                  '건물이나 실내처럼 에지가 뚜렷한 대상을 향해 주세요.',
+            sensitivity: '감도',
+            'err-camera': '카메라를 시작할 수 없습니다',
+        },
+        en: {
+            _title: 'Wireframe',
+            title: 'Wireframe',
+            start: 'Start camera',
+            desc: 'Detects contours in the camera image every frame and draws them as glowing lines.<br>' +
+                  'Aim at something with clear edges, like buildings or interiors.',
+            sensitivity: 'Sensitivity',
+            'err-camera': 'Cannot start the camera',
+        },
+    });
+
     // =====================================================================
     // 画面空間エフェクトの実装。
     // 3D復元もトラッキングもせず、毎フレーム画像からエッジを計算して
@@ -187,7 +219,7 @@
             });
             await video.play();
         } catch (e) {
-            alert(`カメラを起動できません: ${e.message}`);
+            alert(`${I18N.t('err-camera')}: ${e.message}`);
             return;
         }
         document.getElementById('start-overlay').classList.add('hidden');

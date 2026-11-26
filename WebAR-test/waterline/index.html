@@ -121,9 +121,10 @@
     <canvas id="overlay-layer"></canvas>
 
     <div id="start-overlay">
-        <h1 style="font-size:26px; margin-bottom:16px;">水辺のライン認識</h1>
-        <button id="start-button">カメラを起動</button>
-        <p>
+        <nav id="lang-nav"></nav>
+        <h1 style="font-size:26px; margin-bottom:16px;" data-i18n="title">水辺のライン認識</h1>
+        <button id="start-button" data-i18n="start">カメラを起動</button>
+        <p data-i18n="desc">
             水面を水平な面として認識し、面のあちこちから光の粒を立ち上らせます。<br>
             画面の下半分に水面が入るように構えてください。<br>
             認識位置がずれるときは、画面に映った水面をタップしてください。
@@ -131,20 +132,116 @@
     </div>
 
     <div id="hud" class="hidden"><span id="hud-text"></span></div>
-    <button id="panel-toggle" class="hidden">調整</button>
+    <button id="panel-toggle" class="hidden" data-i18n="panel">調整</button>
     <div id="controls" class="hidden">
-        <label for="tolerance">色の許容差</label>
+        <label for="tolerance" data-i18n="tolerance">色の許容差</label>
         <input type="range" id="tolerance" min="5" max="40" value="12">
-        <label for="cam-height">カメラの高さ</label>
+        <label for="cam-height" data-i18n="cam-height">カメラの高さ</label>
         <input type="range" id="cam-height" min="0.8" max="4.0" step="0.1" value="1.5">
-        <button id="style-toggle">表示を矩形ドットにする</button>
+        <button id="style-toggle" data-i18n="style-to-pixel">表示を矩形ドットにする</button>
+        <button id="ml-button" data-i18n="ml-button">MLで水面を認識 (SegFormer)</button>
     </div>
 
+    <script src="../i18n.js"></script>
     <script src="waterline.js"></script>
+    <script src="seg.js"></script>
     <script>
+    I18N.init({
+        ja: {
+            _title: '水辺のライン認識',
+            title: '水辺のライン認識',
+            start: 'カメラを起動',
+            desc: '水面を水平な面として認識し、面のあちこちから光の粒を立ち上らせます。<br>' +
+                  '画面の下半分に水面が入るように構えてください。<br>' +
+                  '認識位置がずれるときは、画面に映った水面をタップしてください。',
+            panel: '調整',
+            tolerance: '色の許容差',
+            'cam-height': 'カメラの高さ',
+            'style-to-pixel': '表示を矩形ドットにする',
+            'style-to-round': '表示を丸にする',
+            'ml-button': 'MLで水面を認識 (SegFormer)',
+            'hud-retap': 'タップ位置を水面として認識し直します',
+            'err-camera': 'カメラを起動できません',
+            // waterline.js からの定常ステータス (I18N.tr で逆引き変換)
+            'hud-tracking': '水面を認識中 (ずれるときは水面をタップ)',
+            'hud-notfound': '水面が見つかりません。画面に映った水面をタップしてください',
+            // seg.js / ML関連
+            'ml-loading': 'MLモデルを読み込み中 (初回のみ約15MB)',
+            'ml-progress': 'モデルを取得中',
+            'ml-wasm': 'WebGPU不可、WASMで読み込み中',
+            'ml-infer': '推論中',
+            'ml-found': 'MLが水面を検出',
+            'ml-none': 'MLは水面を検出できませんでした (色ベースを継続)',
+            'ml-fail': 'ML認識に失敗',
+        },
+        ko: {
+            _title: '수면 인식',
+            title: '수면 인식',
+            start: '카메라 시작',
+            desc: '수면을 수평한 면으로 인식해 면 곳곳에서 빛의 입자를 피워 올립니다.<br>' +
+                  '화면 아래쪽 절반에 수면이 들어오도록 구도를 잡아 주세요.<br>' +
+                  '인식 위치가 어긋나면 화면에 비친 수면을 탭해 주세요.',
+            panel: '설정',
+            tolerance: '색 허용 범위',
+            'cam-height': '카메라 높이',
+            'style-to-pixel': '사각 도트로 표시',
+            'style-to-round': '원으로 표시',
+            'ml-button': 'ML로 수면 인식 (SegFormer)',
+            'hud-retap': '탭한 위치를 수면으로 다시 인식합니다',
+            'err-camera': '카메라를 시작할 수 없습니다',
+            'hud-tracking': '수면 인식 중 (어긋나면 수면을 탭)',
+            'hud-notfound': '수면을 찾지 못했습니다. 화면에 비친 수면을 탭해 주세요',
+            'ml-loading': 'ML 모델 로딩 중 (최초 1회, 약 15MB)',
+            'ml-progress': '모델 다운로드 중',
+            'ml-wasm': 'WebGPU 사용 불가, WASM으로 로딩 중',
+            'ml-infer': '추론 중',
+            'ml-found': 'ML이 수면을 감지',
+            'ml-none': 'ML이 수면을 찾지 못했습니다 (색 기반 인식을 계속)',
+            'ml-fail': 'ML 인식 실패',
+        },
+        en: {
+            _title: 'Water surface',
+            title: 'Water surface',
+            start: 'Start camera',
+            desc: 'Recognizes the water as a horizontal plane and raises particles of light across it.<br>' +
+                  'Frame the water in the lower half of the view.<br>' +
+                  'If the recognition is off, tap the water on screen.',
+            panel: 'Settings',
+            tolerance: 'Color tolerance',
+            'cam-height': 'Camera height',
+            'style-to-pixel': 'Draw as square dots',
+            'style-to-round': 'Draw as circles',
+            'ml-button': 'Detect water with ML (SegFormer)',
+            'hud-retap': 'Re-anchoring to the tapped point',
+            'err-camera': 'Cannot start the camera',
+            'hud-tracking': 'Tracking the water (tap the water if it drifts)',
+            'hud-notfound': 'No water found. Tap the water on screen',
+            'ml-loading': 'Loading the ML model (first time only, about 15MB)',
+            'ml-progress': 'Downloading model',
+            'ml-wasm': 'WebGPU unavailable, loading with WASM',
+            'ml-infer': 'Running inference',
+            'ml-found': 'ML detected water',
+            'ml-none': 'ML found no water (continuing with color-based detection)',
+            'ml-fail': 'ML detection failed',
+        },
+    });
+
+    // seg.js の進捗メッセージ (日本語) を現在の言語へ変換する
+    function trProgress(text) {
+        const m = text.match(/^モデルを取得中 (\d+)%$/);
+        if (m) return `${I18N.t('ml-progress')} ${m[1]}%`;
+        return I18N.tr(text);
+    }
+
     const video = document.getElementById('camera-feed');
     const hud = document.getElementById('hud');
     const hudText = document.getElementById('hud-text');
+    // ML関連のメッセージは、検出ループの定常ステータスに一定時間上書きされないようにする
+    let hudHoldUntil = 0;
+    function holdHud(text, ms) {
+        hudText.textContent = text;
+        hudHoldUntil = performance.now() + ms;
+    }
 
     async function start() {
         // iOS: DeviceOrientation はユーザー操作起点の許可が必要
@@ -163,7 +260,7 @@
             });
             await video.play();
         } catch (e) {
-            alert(`カメラを起動できません: ${e.message}`);
+            alert(`${I18N.t('err-camera')}: ${e.message}`);
             return;
         }
         document.getElementById('start-overlay').classList.add('hidden');
@@ -176,12 +273,15 @@
             layer: document.getElementById('overlay-layer'),
             toleranceInput: document.getElementById('tolerance'),
             camHeightInput: document.getElementById('cam-height'),
-            onStatus: t => { hud.classList.remove('hidden'); hudText.textContent = t; },
+            onStatus: t => {
+                hud.classList.remove('hidden');
+                if (performance.now() >= hudHoldUntil) hudText.textContent = I18N.tr(t);
+            },
         });
 
         window.addEventListener('click', ev => {
             if (Waterline.setSeedFromScreen(ev.clientX, ev.clientY)) {
-                hudText.textContent = 'タップ位置を水面として認識し直します';
+                hudText.textContent = I18N.t('hud-retap');
             }
         });
     }
@@ -192,11 +292,37 @@
         e.stopPropagation();
         document.getElementById('controls').classList.toggle('hidden');
     });
+    // ML認識: 初回はモデル読み込み (約15MB) → 現フレームを推論 → 事前知識として渡す
+    document.getElementById('ml-button').addEventListener('click', async e => {
+        e.stopPropagation();
+        const btn = e.target;
+        btn.disabled = true;
+        try {
+            if (!WaterSeg.ready) {
+                holdHud(I18N.t('ml-loading'), 60000);
+                await WaterSeg.load(t => holdHud(trProgress(t), 60000));
+            }
+            holdHud(`${I18N.t('ml-infer')} (${WaterSeg.device})`, 60000);
+            const m = await WaterSeg.segment(video, video.videoWidth, video.videoHeight);
+            if (m) {
+                Waterline.setMLMask(m);
+                holdHud(`${I18N.t('ml-found')}: ${m.labels.join(', ')}`, 4000);
+            } else {
+                holdHud(I18N.t('ml-none'), 4000);
+            }
+        } catch (err) {
+            holdHud(`${I18N.t('ml-fail')}: ${err.message}`, 6000);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+    let pixelStyle = false;
     document.getElementById('style-toggle').addEventListener('click', e => {
         e.stopPropagation();
-        const pixel = e.target.textContent.includes('矩形');
-        Waterline.setStyle(pixel ? 'pixel' : 'round');
-        e.target.textContent = pixel ? '表示を丸にする' : '表示を矩形ドットにする';
+        pixelStyle = !pixelStyle;
+        Waterline.setStyle(pixelStyle ? 'pixel' : 'round');
+        e.target.dataset.i18n = pixelStyle ? 'style-to-round' : 'style-to-pixel';
+        e.target.textContent = I18N.t(e.target.dataset.i18n);
     });
     // 開始画面のクリックがwindowのタップ処理 (シード指定) に届かないようにする
     document.getElementById('start-overlay').addEventListener('click', e => e.stopPropagation());

@@ -150,10 +150,12 @@
         <input type="range" id="pitch" min="0" max="80" step="1" value="20">
         <output id="pitch-out">20°</output>
         <button id="style-toggle">表示を矩形ドットにする</button>
+        <button id="ml-button">MLで水面を認識 (SegFormer)</button>
         <button id="change-photo">別の写真にする</button>
     </div>
 
     <script src="waterline.js"></script>
+    <script src="seg.js"></script>
     <script>
     // カメラ映像の代わりに、写真を描いた canvas をソースとして
     // waterline.js のパイプラインに渡す。ロジックは本番 (index.html) と同一。
@@ -163,6 +165,12 @@
     const hud = document.getElementById('hud');
     const hudText = document.getElementById('hud-text');
     let started = false;
+    // ML関連のメッセージは、検出ループの定常ステータスに一定時間上書きされないようにする
+    let hudHoldUntil = 0;
+    function holdHud(text, ms) {
+        hudText.textContent = text;
+        hudHoldUntil = performance.now() + ms;
+    }
 
     function applyPitch() {
         // 縦持ちでカメラ水平が beta=90。俯角ぶんだけ下に向ける
@@ -189,7 +197,10 @@
                 layer: document.getElementById('overlay-layer'),
                 toleranceInput: document.getElementById('tolerance'),
                 camHeightInput: document.getElementById('cam-height'),
-                onStatus: t => { hud.classList.remove('hidden'); hudText.textContent = t; },
+                onStatus: t => {
+                    hud.classList.remove('hidden');
+                    if (performance.now() >= hudHoldUntil) hudText.textContent = t;
+                },
             });
             window.addEventListener('click', ev => {
                 if (Waterline.setSeedFromScreen(ev.clientX, ev.clientY)) {
@@ -252,6 +263,30 @@
     document.getElementById('panel-toggle').addEventListener('click', e => {
         e.stopPropagation();
         document.getElementById('controls').classList.toggle('hidden');
+    });
+    // ML認識: 初回はモデル読み込み (約15MB) → 現在の写真を推論 → 事前知識として渡す
+    document.getElementById('ml-button').addEventListener('click', async e => {
+        e.stopPropagation();
+        const btn = e.target;
+        btn.disabled = true;
+        try {
+            if (!WaterSeg.ready) {
+                holdHud('MLモデルを読み込み中 (初回のみ約15MB)', 60000);
+                await WaterSeg.load(t => holdHud(t, 60000));
+            }
+            holdHud(`推論中 (${WaterSeg.device})`, 60000);
+            const m = await WaterSeg.segment(photoCanvas, photoCanvas.width, photoCanvas.height);
+            if (m) {
+                Waterline.setMLMask(m);
+                holdHud(`MLが水面を検出: ${m.labels.join(', ')}`, 4000);
+            } else {
+                holdHud('MLは水面を検出できませんでした (色ベースを継続)', 4000);
+            }
+        } catch (err) {
+            holdHud(`ML認識に失敗: ${err.message}`, 6000);
+        } finally {
+            btn.disabled = false;
+        }
     });
     document.getElementById('style-toggle').addEventListener('click', e => {
         e.stopPropagation();
